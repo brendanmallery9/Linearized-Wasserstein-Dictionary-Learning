@@ -6,6 +6,7 @@
 #   bash llm/scripts/run_pile100k_pipeline.sh --device mps             # Apple Silicon
 #   bash llm/scripts/run_pile100k_pipeline.sh --device cpu             # CPU only
 #   bash llm/scripts/run_pile100k_pipeline.sh --num-gpus 4             # multi-GPU embed (cuda only)
+#   bash llm/scripts/run_pile100k_pipeline.sh --embed                  # compute missing activations
 #   bash llm/scripts/run_pile100k_pipeline.sh --skip-embed             # reuse existing activations
 #   bash llm/scripts/run_pile100k_pipeline.sh --skip-gaussian          # reuse source.pt + pca.pt
 #   bash llm/scripts/run_pile100k_pipeline.sh --skip-brenier           # reuse potentials/
@@ -36,7 +37,7 @@ N_WORKERS="${N_WORKERS:-16}"       # parallel workers for Brenier step
 # DEVICE auto-detect (cuda > cpu). Override via --device or DEVICE env.
 DEVICE="${DEVICE:-}"
 
-SKIP_EMBED=false
+SKIP_EMBED=true
 SKIP_GAUSSIAN=false
 SKIP_BRENIER=false
 SKIP_TRAIN=true
@@ -50,6 +51,7 @@ while [[ $# -gt 0 ]]; do
         --epochs)         EPOCHS="$2"; shift 2 ;;
         --n-docs)         N_DOCS="$2"; shift 2 ;;
         --root)           ROOT="$2"; shift 2 ;;
+        --embed)          SKIP_EMBED=false; shift ;;
         --skip-embed)     SKIP_EMBED=true; shift ;;
         --skip-gaussian)  SKIP_GAUSSIAN=true; shift ;;
         --skip-brenier)   SKIP_BRENIER=true; shift ;;
