@@ -1,0 +1,16 @@
+data_path: datasets/hsi_data/Pavia/data/stacked_data
+hidden_dim: 10
+architecture: JumpReLU_nonneg
+input_dim: 102
+batch_size: 1024
+epochs: 400
+lr: 0.0001
+l1: 0.001
+top_k: 0
+device: cuda
+log_dir: datasets/hsi_data/Pavia/SAE_params/linear/unreg/seed_0/JUMPRELUAE_10_1e-3_nonneg
+log_every: 50
+grad_clip: 100.0
+normalize: False
+validation_path: datasets/hsi_data/Pavia/data/val_data
+val_frequency: 0.9

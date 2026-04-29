@@ -1,0 +1,28 @@
+# Core numeric / ML
+numpy<2
+torch
+torchvision
+scipy
+
+# Optimal transport
+pot
+
+# ML utilities
+scikit-learn
+tensorboard
+
+# Data / NLP (LLM pipeline)
+datasets
+transformers
+transformer_lens
+
+# Plotting
+matplotlib
+plotly
+pandas
+umap-learn
+
+# HSI-specific
+h5py
+requests
+tqdm

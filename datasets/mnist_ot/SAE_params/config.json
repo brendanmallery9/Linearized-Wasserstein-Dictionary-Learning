@@ -1,0 +1,31 @@
+{
+  "data_dir": "datasets/mnist_ot",
+  "digits": null,
+  "test_fraction": 0.1,
+  "seed": 42,
+  "m": 30,
+  "grid_side": 64,
+  "grid_mode": "uniform",
+  "grid_n_images": 500,
+  "grid_support_size": null,
+  "lista_steps": 20,
+  "batch_size": 256,
+  "epochs": 3000,
+  "lr": 0.001,
+  "optimizer": "adamw",
+  "weight_decay": 0.1,
+  "scheduler": "none",
+  "lr_min": 0.0,
+  "epsilons": [
+    0.025
+  ],
+  "sparsity_coeffs": [
+    0.0001
+  ],
+  "methods": [
+    "displacement"
+  ],
+  "output_dir": "2D_WDL_results",
+  "device": "auto",
+  "gpu_ids": null
+}

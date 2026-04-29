@@ -1,0 +1,16 @@
+data_path: datasets/hsi_data/salinas_a/potentials/stacked_data
+hidden_dim: 7
+architecture: JumpReLU_monotone
+input_dim: 204
+batch_size: 1024
+epochs: 400
+lr: 1e-05
+l1: 1e-05
+top_k: 0
+device: cuda
+log_dir: datasets/hsi_data/salinas_a/SAE_params/potentials/unreg/seed_0/JUMPRELUAE_7_1e-5_mon
+log_every: 50
+grad_clip: 100.0
+normalize: False
+validation_path: datasets/hsi_data/salinas_a/potentials/val_data
+val_frequency: 0.9

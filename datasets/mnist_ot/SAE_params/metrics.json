@@ -1,0 +1,20 @@
+[
+  {
+    "method": "displacement",
+    "epsilon": 0.025,
+    "sparsity_coeff": 0.0001,
+    "device": "cuda",
+    "m": 30,
+    "epochs": 3000,
+    "lr": 0.001,
+    "elapsed_seconds": 6708.3,
+    "train_recon_loss": 0.0005657029741754135,
+    "train_total_loss": 0.0007087622178650564,
+    "train_mean_l1": 1.4305924368964302,
+    "train_mean_active": 25.441777777777776,
+    "test_recon_loss": 0.0005682117789983749,
+    "test_total_loss": 0.0007115193168401718,
+    "test_mean_l1": 1.4330753784179688,
+    "test_mean_active": 25.482
+  }
+]
