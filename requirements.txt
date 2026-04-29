@@ -21,6 +21,7 @@ matplotlib
 plotly
 pandas
 umap-learn
+ipywidgets
 
 # HSI-specific
 h5py
