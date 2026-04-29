@@ -241,6 +241,20 @@ def to_torch_save(cube: np.ndarray, gt: Optional[np.ndarray], dataset_root: Path
     cube_dir.mkdir(parents=True, exist_ok=True)
 
     cube_np = np.asarray(cube)
+    if cube_np.dtype not in (
+        np.float64,
+        np.float32,
+        np.float16,
+        np.complex64,
+        np.complex128,
+        np.int64,
+        np.int32,
+        np.int16,
+        np.int8,
+        np.uint8,
+        np.bool_,
+    ):
+        cube_np = cube_np.astype(np.float32, copy=False)
     cube_t = torch.from_numpy(cube_np).to(torch.float32).contiguous()
     torch.save(cube_t, cube_dir / f"{name}_cube.pt")
 
