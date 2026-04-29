@@ -22,7 +22,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 # ---- defaults (overridable via flags or env) ----
 ROOT="${ROOT:-$REPO_ROOT/datasets/pile-100k}"
 DATASET="${DATASET:-jannikbrinkmann/pile-100k}"
-N_DOCS="${N_DOCS:1000}"             # -1 means all docs
+N_DOCS="${N_DOCS:-100}"             # -1 means all docs
 STREAMING="${STREAMING:-true}"
 SEED="${SEED:-42}"
 EPOCHS="${EPOCHS:-200}"
@@ -36,7 +36,7 @@ N_WORKERS="${N_WORKERS:-16}"       # parallel workers for Brenier step
 # DEVICE auto-detect (cuda > cpu). Override via --device or DEVICE env.
 DEVICE="${DEVICE:-}"
 
-SKIP_EMBED=true
+SKIP_EMBED=false
 SKIP_GAUSSIAN=false
 SKIP_BRENIER=false
 SKIP_TRAIN=true
@@ -90,6 +90,16 @@ dir_has_files() {
     [ -d "$1" ] && [ -n "$(find "$1" -mindepth 1 -type f -print -quit 2>/dev/null)" ]
 }
 
+PIDS=""
+
+cleanup_children() {
+    if [ -n "$PIDS" ]; then
+        kill $PIDS 2>/dev/null || true
+    fi
+}
+
+trap cleanup_children INT TERM
+
 echo "=== Config ==="
 echo "ROOT       = $ROOT"
 echo "DATASET    = $DATASET"
@@ -111,7 +121,7 @@ else
     [ "$STREAMING" = true ] && EMBED_EXTRA_FLAGS="$EMBED_EXTRA_FLAGS --streaming"
     [ "$N_DOCS" -gt 0 ]    && EMBED_EXTRA_FLAGS="$EMBED_EXTRA_FLAGS --n_docs $N_DOCS"
 
-    PIDS=()
+    PIDS=""
     for GPU_ID in $(seq 0 $((NUM_GPUS - 1))); do
         # shellcheck disable=SC2086
         python "$PIPELINE_DIR/embed_document_from_hf.py" \
@@ -124,17 +134,19 @@ else
             --gpu_id     "$GPU_ID" \
             --num_gpus   "$NUM_GPUS" \
             $EMBED_EXTRA_FLAGS &
-        PIDS+=($!)
-        echo "  Launched worker $GPU_ID (PID ${PIDS[-1]})"
+        PID=$!
+        PIDS="${PIDS:+$PIDS }$PID"
+        echo "  Launched worker $GPU_ID (PID $PID)"
     done
 
     EMBED_FAIL=0
-    for PID in "${PIDS[@]}"; do
+    for PID in $PIDS; do
         if ! wait "$PID"; then
             echo "ERROR: Embedding process $PID failed"
             EMBED_FAIL=1
         fi
     done
+    PIDS=""
     if [ "$EMBED_FAIL" -ne 0 ]; then
         echo "One or more embedding processes failed. Aborting."
         exit 1
