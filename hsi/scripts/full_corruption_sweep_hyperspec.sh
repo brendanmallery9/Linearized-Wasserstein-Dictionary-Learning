@@ -88,7 +88,7 @@ fi
 # ---------------------------------------------------------------------------
 # Detect compute device and number of parallel slots
 # ---------------------------------------------------------------------------
-DEVICE_INFO=$(python -c "
+DEVICE_INFO=$(python3 -c "
 import torch
 
 if torch.cuda.is_available():
@@ -104,9 +104,9 @@ elif torch.backends.mps.is_available():
 else:
     print('cpu 1')
     print('  No GPU detected — falling back to CPU', flush=True)
-" 2>&1)
+" 2>/dev/null)
 
-DEVICE_TOKEN=$(echo "$DEVICE_INFO" | head -1)
+DEVICE_TOKEN=$(echo "$DEVICE_INFO" | grep -m1 -E '^(cuda|mps|cpu) [0-9]+')
 DEVICE_TYPE=$(echo "$DEVICE_TOKEN" | awk '{print $1}')
 N_SLOTS=$(echo  "$DEVICE_TOKEN" | awk '{print $2}')
 
@@ -235,8 +235,15 @@ done
 
 echo ""
 echo "Waiting for all slots to finish..."
-wait
+_failed_slots=0
+for _pid in "${PIDS[@]}"; do
+    wait "$_pid" || (( _failed_slots++ )) || true
+done
 echo ""
-echo "All sweeps complete."
+if [ "$_failed_slots" -gt 0 ]; then
+    echo "WARNING: $_failed_slots slot(s) exited with errors. Check per-slot logs in $RESULTS_DIR."
+else
+    echo "All sweeps complete."
+fi
 echo "Output JSONs : $RESULTS_DIR/drop_random.json $RESULTS_DIR/drop_contiguous.json $RESULTS_DIR/log_warp.json"
 echo "Visualizations: $RESULTS_DIR/drop_random/ $RESULTS_DIR/drop_contiguous/ $RESULTS_DIR/log_warp/"

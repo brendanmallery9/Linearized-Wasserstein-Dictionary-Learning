@@ -68,8 +68,11 @@ def sae_encode_potential_batch(
         # numpy -> torch, stay on device, force float32
         X = torch.as_tensor(data_tensor, device=device, dtype=torch.float32)
 
-    # Load checkpoint
+    # Load checkpoint — unwrap whichever nesting key the trainer used
+    # Two sequential ifs (not elif) to handle double-nested dicts
     state_dict = torch.load(model_path, map_location=device)
+    if isinstance(state_dict, dict) and "model_state_dict" in state_dict:
+        state_dict = state_dict["model_state_dict"]
     if isinstance(state_dict, dict) and "state_dict" in state_dict:
         state_dict = state_dict["state_dict"]
 

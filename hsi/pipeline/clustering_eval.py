@@ -904,7 +904,9 @@ def main():
         # ------------------------------------------------------------------
         # Load raw data ONCE for this dataset
         # ------------------------------------------------------------------
-        og_train_seed0 = torch.load(og_pt, map_location="cpu")  # (a,b,c)
+        og_train_seed0 = torch.load(og_pt, map_location="cpu")
+        if isinstance(og_train_seed0, dict):
+            og_train_seed0 = og_train_seed0["cube"]
         a, b, c = og_train_seed0.shape
         og_train_seed0 = og_train_seed0.reshape(a*b, c)
         og_train_np = og_train_seed0.numpy()        # (a*b,c)
