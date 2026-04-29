@@ -16,6 +16,11 @@ datasets/**
 !datasets/hsi_data/*/
 !datasets/hsi_data/*/SAE_params/
 !datasets/hsi_data/*/SAE_params/**
+!datasets/noised_luther/txt/
+!datasets/noised_luther/txt/base/
+!datasets/noised_luther/txt/base/luther.txt
+!datasets/pile-100k/source.pt
+!datasets/pile-100k/pca.pt
 datasets/**/.DS_Store
 datasets/**/encoded_codes.pt
 2D_WDL_results/

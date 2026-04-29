@@ -282,8 +282,8 @@ Most generated artifacts are written under `datasets/`:
 - `datasets/hsi_data/<dataset>/data/`: hyperspectral cubes
 - `datasets/hsi_data/<dataset>/transport_maps/`: HSI OT transport-map outputs
 - `datasets/hsi_data/<dataset>/SAE_params/`: trained HSI SAE checkpoints
-- `datasets/noised_luther/`: noised text, activations, potentials, and SAE outputs
-- `datasets/pile-100k/`: Pile activations, potentials, PCA/source files, and SAE outputs
+- `datasets/noised_luther/`: noised text, activations, potentials, SAE outputs, and the included base `luther.txt`
+- `datasets/pile-100k/`: Pile activations, potentials, included `source.pt`/`pca.pt`, and SAE outputs
 - `datasets/mnist_ot/`: MNIST OT maps and SAE outputs
 
 Pipeline logs are written to `logs/` unless a script-specific results directory
