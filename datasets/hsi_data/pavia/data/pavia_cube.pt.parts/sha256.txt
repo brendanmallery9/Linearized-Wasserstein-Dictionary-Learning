@@ -1,0 +1,1 @@
+4bba9c655bca82463761f6e64dc442e5158ef430104ed0255e15bed2516a5d15  datasets/hsi_data/pavia/data/pavia_cube.pt

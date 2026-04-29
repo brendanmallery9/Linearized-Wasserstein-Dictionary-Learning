@@ -16,6 +16,11 @@ datasets/**
 !datasets/hsi_data/*/
 !datasets/hsi_data/*/SAE_params/
 !datasets/hsi_data/*/SAE_params/**
+!datasets/hsi_data/pavia/data/
+!datasets/hsi_data/pavia/data/pavia_cube.pt.parts/
+!datasets/hsi_data/pavia/data/pavia_cube.pt.parts/**
+!datasets/hsi_data/pavia/ground_truth/
+!datasets/hsi_data/pavia/ground_truth/pavia_gt.pt
 !datasets/noised_luther/txt/
 !datasets/noised_luther/txt/base/
 !datasets/noised_luther/txt/base/luther.txt

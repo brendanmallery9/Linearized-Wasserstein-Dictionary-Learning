@@ -17,6 +17,7 @@ Works for classic MAT and MAT v7.3 (HDF5).
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 from typing import Dict, Optional, Any, Tuple
 
@@ -255,6 +256,73 @@ def to_torch_save(cube: np.ndarray, gt: Optional[np.ndarray], dataset_root: Path
         torch.save(gt_t, gt_dir / f"{name}_gt.pt")
 
 
+def save_gt_only(
+    gt: np.ndarray,
+    dataset_root: Path,
+    name: str,
+    expected_shape: Optional[Tuple[int, int]] = None,
+) -> None:
+    """Save ground truth when the cube was restored from bundled chunks."""
+    gt_dir = dataset_root / "ground_truth"
+    gt_dir.mkdir(parents=True, exist_ok=True)
+
+    gt_np = np.asarray(gt)
+    if expected_shape is not None and gt_np.shape == (expected_shape[1], expected_shape[0]):
+        gt_np = gt_np.T
+    gt_t = torch.from_numpy(gt_np.astype(np.int64, copy=False)).contiguous()
+    torch.save(gt_t, gt_dir / f"{name}_gt.pt")
+
+
+def restore_pavia_cube_from_chunks(dataset_root: Path) -> bool:
+    """Reassemble the bundled Pavia cube chunks, if present."""
+    cube_path = dataset_root / "data" / "pavia_cube.pt"
+    parts_dir = dataset_root / "data" / "pavia_cube.pt.parts"
+    checksum_path = parts_dir / "sha256.txt"
+    parts = sorted(parts_dir.glob("part-*"))
+
+    if not parts:
+        return False
+
+    if cube_path.exists():
+        print(f"✓ Pavia cube already assembled: {cube_path}")
+        return True
+
+    print(f"Reassembling bundled Pavia cube chunks → {cube_path}")
+    cube_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = cube_path.with_suffix(cube_path.suffix + ".tmp")
+
+    try:
+        with open(tmp_path, "wb") as out:
+            for part in parts:
+                print(f"  adding {part.name}")
+                with open(part, "rb") as inp:
+                    for chunk in iter(lambda: inp.read(1024 * 1024), b""):
+                        out.write(chunk)
+
+        if checksum_path.exists():
+            expected = checksum_path.read_text().split()[0]
+            h = hashlib.sha256()
+            with open(tmp_path, "rb") as f:
+                for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                    h.update(chunk)
+            actual = h.hexdigest()
+            if actual != expected:
+                raise RuntimeError(
+                    f"Pavia cube checksum mismatch: got {actual}, expected {expected}"
+                )
+
+        tmp_path.replace(cube_path)
+    finally:
+        if tmp_path.exists():
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
+
+    print(f"✓ Restored: {cube_path}")
+    return True
+
+
 # ----------------------------
 # Main
 # ----------------------------
@@ -280,6 +348,15 @@ def main() -> None:
         mat_dir = dataset_root / "_raw_mat"
         print(f"\n=== {name} ===")
 
+        pavia_cube_restored = name == "pavia" and restore_pavia_cube_from_chunks(dataset_root)
+        if pavia_cube_restored:
+            gt_path = dataset_root / "ground_truth" / "pavia_gt.pt"
+            if gt_path.exists():
+                print(f"✓ Pavia GT already available: {gt_path}")
+                print("✓ Using bundled Pavia cube chunks; skipping remote Pavia download.")
+                continue
+            files = {"Pavia_gt.mat": files["Pavia_gt.mat"]}
+
         mat_paths = []
         for fname, url in files.items():
             outpath = mat_dir / fname
@@ -302,6 +379,26 @@ def main() -> None:
                 print(f"  gt   from {p.name} (var='{gkey}', shape={tuple(g.shape)})")
 
         if cube is None:
+            if pavia_cube_restored:
+                if gt is not None:
+                    save_gt_only(gt, dataset_root, name, expected_shape=(1096, 715))
+                    print(f"✓ Saved: {dataset_root / 'ground_truth' / (name + '_gt.pt')}")
+                else:
+                    print("ℹ No GT found; only restored Pavia cube.")
+
+                if not args.keep_raw_mat:
+                    for p in mat_paths:
+                        try:
+                            p.unlink()
+                            print(f"✓ Removed temporary source: {p}")
+                        except FileNotFoundError:
+                            pass
+                    try:
+                        mat_dir.rmdir()
+                    except OSError:
+                        pass
+                continue
+
             raise RuntimeError(f"Failed to find a 3D cube for dataset '{name}'.")
 
         # If we found GT but it doesn't match cube H/W, warn (still save as-is)

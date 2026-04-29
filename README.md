@@ -91,6 +91,9 @@ pipeline does not train by default; pass `--train` only when you intentionally
 want to write new SAE outputs. If the target SAE directory already has files,
 the script refuses to train unless you also pass `--force-train`. The HSI
 notebook can use the pretrained SAE checkpoints already under `datasets/hsi_data`.
+The Pavia cube is bundled as tracked chunks under `datasets/hsi_data/pavia/data/`;
+the download script reassembles those chunks into `pavia_cube.pt` before falling
+back to the slower remote Pavia download.
 
 ```bash
 # Run the main HSI SAE pipeline for the datasets used in the analysis.
