@@ -259,26 +259,24 @@ run_maps() {
 
   local supp_size
   supp_size="$(resolve_source_supp_size)"
-  local worker_args=()
-  local overwrite_args=()
+  local cmd=(
+    "$PYTHON" -u hsi/pipeline/compute_transport_maps.py
+    --data_root "$DATA_DIR"
+    --output_root "$TRANSPORT_MAPS_DIR"
+    --source_supp_size "$supp_size"
+  )
   if [[ -n "$OT_WORKERS" ]]; then
-    worker_args=(--num_workers "$OT_WORKERS")
+    cmd+=(--num_workers "$OT_WORKERS")
   fi
   if [[ "$FORCE_MAPS" -eq 1 ]]; then
-    overwrite_args=(--overwrite)
+    cmd+=(--overwrite)
   fi
 
   echo "[maps] computing transport maps"
   echo "  data_root: $DATA_DIR"
   echo "  output_root: $TRANSPORT_MAPS_DIR"
   echo "  source_supp_size: $supp_size"
-  "$PYTHON" -u hsi/pipeline/compute_transport_maps.py \
-    --data_root "$DATA_DIR" \
-    --output_root "$TRANSPORT_MAPS_DIR" \
-    --source_supp_size "$supp_size" \
-    "${worker_args[@]}" \
-    "${overwrite_args[@]}" \
-    2>&1 | tee "$LOG_DIR/hsi_${DATASET}_transport_maps.log"
+  "${cmd[@]}" 2>&1 | tee "$LOG_DIR/hsi_${DATASET}_transport_maps.log"
 }
 
 train_one_mode() {
