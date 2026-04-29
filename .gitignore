@@ -29,3 +29,4 @@ hyperspec_images/
 
 tmp*.json
 *.log
+llm/scripts/run_pile100k_sweep.sh

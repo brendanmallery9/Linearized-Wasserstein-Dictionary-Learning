@@ -2,7 +2,7 @@
 # pile-100k pipeline: embed -> Gaussian source + PCA -> Brenier potentials -> optional SAE training
 #
 # Usage:
-#   bash llm/scripts/run_pile100k_pipeline.sh                          # reuse existing activations/SAE_params by default
+#   bash llm/scripts/run_pile100k_pipeline.sh                          # embed missing activations by default
 #   bash llm/scripts/run_pile100k_pipeline.sh --device mps             # Apple Silicon
 #   bash llm/scripts/run_pile100k_pipeline.sh --device cpu             # CPU only
 #   bash llm/scripts/run_pile100k_pipeline.sh --num-gpus 4             # multi-GPU embed (cuda only)
@@ -37,7 +37,7 @@ N_WORKERS="${N_WORKERS:-16}"       # parallel workers for Brenier step
 # DEVICE auto-detect (cuda > cpu). Override via --device or DEVICE env.
 DEVICE="${DEVICE:-}"
 
-SKIP_EMBED=true
+SKIP_EMBED=false
 SKIP_GAUSSIAN=false
 SKIP_BRENIER=false
 SKIP_TRAIN=true
