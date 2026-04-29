@@ -68,7 +68,6 @@ The pipelines can also train additional models from scratch but skip this by def
 for dataset in salinas_a pavia botswana; do
   bash hsi/scripts/run_hsi_sae_pipeline.sh --dataset "$dataset" --sae-mode both --seeds "0 1 2 3 4"
 done
-bash hsi/scripts/full_corruption_sweep_hyperspec.sh --root datasets/hsi_data --sae-mode both
 jupyter notebook hsi/analysis/notebooks/hyperspectral_SAE_analysis.ipynb
 
 # MNIST
@@ -101,9 +100,6 @@ for dataset in salinas_a pavia botswana; do
     --sae-mode both \
     --seeds "0 1 2 3 4"
 done
-
-# Run the full HSI corruption sweep after the needed SAE models exist.
-bash hsi/scripts/full_corruption_sweep_hyperspec.sh --root datasets/hsi_data --sae-mode both
 ```
 
 HSI datasets discussed here:
@@ -127,6 +123,12 @@ SAEs, and NMF baselines across corruption types and severities.
 `full_corruption_sweep_hyperspec.sh` averages results over seeds. By default,
 the corruption sweep uses corruption seeds `0 1 2 3 4` and training seeds
 `0 1 2 3 4`. It expects the corresponding SAE checkpoints to already exist.
+
+Run the full HSI corruption sweep after the needed SAE models exist:
+
+```bash
+bash hsi/scripts/full_corruption_sweep_hyperspec.sh --root datasets/hsi_data --sae-mode both
+```
 
 Notebook:
 
