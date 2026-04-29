@@ -13,7 +13,7 @@ tensorboard
 
 # Data / NLP (LLM pipeline)
 datasets
-transformers
+transformers<5
 transformer_lens
 
 # Plotting
