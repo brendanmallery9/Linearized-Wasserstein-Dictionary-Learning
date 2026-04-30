@@ -10,6 +10,7 @@ pot
 # ML utilities
 scikit-learn
 tensorboard
+joblib
 
 # Data / NLP (LLM pipeline)
 datasets
@@ -20,10 +21,13 @@ transformer_lens
 matplotlib
 plotly
 pandas
+seaborn
 umap-learn==0.5.12
 numba==0.62.1
 llvmlite==0.45.1
+ipython
 ipywidgets
+pillow
 
 # HSI-specific
 h5py
