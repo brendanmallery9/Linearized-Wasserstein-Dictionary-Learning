@@ -167,12 +167,11 @@ def apply_linux_cxx_link_patch(source_dir: Path) -> bool:
     cmake_path = source_dir / "cpp" / "CMakeLists.txt"
     text = cmake_path.read_text()
     marker = "Codex Linux CXX link patch"
-    if marker in text:
+    if marker in text and "CODEX_LIBSTDCXX" in text:
         return False
 
     needle = "    target_link_libraries(app_dictionary_learning ${ADDITIONAL_LINKER_FLAG})\n"
-    replacement = (
-        needle +
+    patch_block = (
         f"    # {marker}: keep mixed C/C++ target on the C++ linker and\n"
         "    # explicitly link the libstdc++ that belongs to CMAKE_CXX_COMPILER.\n"
         "    set_target_properties(app_dictionary_learning PROPERTIES LINKER_LANGUAGE CXX)\n"
@@ -189,6 +188,21 @@ def apply_linux_cxx_link_patch(source_dir: Path) -> bool:
         "        endif()\n"
         "    endif()\n"
     )
+    if marker in text:
+        old_block = (
+            f"    # {marker}: keep mixed C/C++ target on the C++ linker and\n"
+            "    # explicitly add libstdc++ on Linux toolchains that omit it.\n"
+            "    set_target_properties(app_dictionary_learning PROPERTIES LINKER_LANGUAGE CXX)\n"
+            "    if(CMAKE_SYSTEM_NAME STREQUAL \"Linux\")\n"
+            "        target_link_libraries(app_dictionary_learning stdc++)\n"
+            "    endif()\n"
+        )
+        if old_block not in text:
+            raise RuntimeError(f"Could not upgrade existing Linux CXX link patch in {cmake_path}")
+        cmake_path.write_text(text.replace(old_block, patch_block))
+        return True
+
+    replacement = needle + patch_block
     if needle not in text:
         raise RuntimeError(f"Could not find app link target in {cmake_path}")
     cmake_path.write_text(text.replace(needle, replacement))
