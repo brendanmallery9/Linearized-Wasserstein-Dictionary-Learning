@@ -174,10 +174,19 @@ def apply_linux_cxx_link_patch(source_dir: Path) -> bool:
     replacement = (
         needle +
         f"    # {marker}: keep mixed C/C++ target on the C++ linker and\n"
-        "    # explicitly add libstdc++ on Linux toolchains that omit it.\n"
+        "    # explicitly link the libstdc++ that belongs to CMAKE_CXX_COMPILER.\n"
         "    set_target_properties(app_dictionary_learning PROPERTIES LINKER_LANGUAGE CXX)\n"
         "    if(CMAKE_SYSTEM_NAME STREQUAL \"Linux\")\n"
-        "        target_link_libraries(app_dictionary_learning stdc++)\n"
+        "        execute_process(\n"
+        "            COMMAND ${CMAKE_CXX_COMPILER} -print-file-name=libstdc++.so\n"
+        "            OUTPUT_VARIABLE CODEX_LIBSTDCXX\n"
+        "            OUTPUT_STRIP_TRAILING_WHITESPACE\n"
+        "        )\n"
+        "        if(CODEX_LIBSTDCXX AND EXISTS \"${CODEX_LIBSTDCXX}\")\n"
+        "            target_link_libraries(app_dictionary_learning \"${CODEX_LIBSTDCXX}\")\n"
+        "        else()\n"
+        "            target_link_libraries(app_dictionary_learning stdc++)\n"
+        "        endif()\n"
         "    endif()\n"
     )
     if needle not in text:
