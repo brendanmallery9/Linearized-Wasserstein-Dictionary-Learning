@@ -289,6 +289,13 @@ def train_one_model(model, train_loader, test_loader, config, device):
     sparsity_warmup = config.get("sparsity_warmup", 0)
 
     model.train()
+    history_path = config.get("history_path")
+    history_every = int(config.get("history_every", 1) or 1)
+    history_time_offset = float(config.get("history_time_offset", 0.0) or 0.0)
+    if history_path:
+        Path(history_path).parent.mkdir(parents=True, exist_ok=True)
+    train_start = time.monotonic()
+    global_step = 0
     for epoch in range(config["epochs"]):
         # Epsilon annealing
         if anneal and eps_start is not None and eps_end is not None:
@@ -330,11 +337,35 @@ def train_one_model(model, train_loader, test_loader, config, device):
 
             epoch_loss += loss.item()
             epoch_steps += 1
+            global_step += 1
 
         if scheduler is not None:
             scheduler.step()
 
         avg_loss = epoch_loss / epoch_steps
+        should_record = (
+            history_path
+            and (epoch == 0
+                 or (epoch + 1) % history_every == 0
+                 or epoch + 1 == config["epochs"])
+        )
+        if should_record:
+            train_elapsed = time.monotonic() - train_start
+            event = {
+                "event": "epoch",
+                "run_name": config.get("name", ""),
+                "epoch": epoch + 1,
+                "epochs": config["epochs"],
+                "global_step": global_step,
+                "train_elapsed_seconds": train_elapsed,
+                "elapsed_seconds": history_time_offset + train_elapsed,
+                "train_loss": avg_loss,
+                "lr": opt.param_groups[0]["lr"],
+                "eps": float(cur_eps),
+                "sparsity_coeff": float(c_eff),
+            }
+            with open(history_path, "a") as f:
+                f.write(json.dumps(event) + "\n")
         if (epoch + 1) % 10 == 0 or epoch == 0:
             lr_now = opt.param_groups[0]['lr']
             tag = config.get("name", "")
@@ -430,6 +461,8 @@ def run_all_experiments(config=None):
 
         # Override sparsity_coeff for this run
         run_config = dict(config, sparsity_coeff=c)
+        if run_config.get("history_path"):
+            run_config["name"] = run_name
 
         t0 = time.time()
         metrics = train_one_model(model, train_loader, test_loader, run_config, device)
@@ -520,6 +553,12 @@ if __name__ == "__main__":
     parser.add_argument("--lr_min", type=float, default=DEFAULT_CONFIG["lr_min"],
                         help="Minimum LR for cosine scheduler")
     parser.add_argument("--seed", type=int, default=DEFAULT_CONFIG["seed"])
+    parser.add_argument("--history_path", type=str, default=None,
+                        help="Optional JSONL path for per-epoch timing/loss history")
+    parser.add_argument("--history_every", type=int, default=1,
+                        help="Record history every N epochs when --history_path is set")
+    parser.add_argument("--history_time_offset", type=float, default=0.0,
+                        help="Seconds to add to history elapsed_seconds, e.g. map-prep time")
 
     args = parser.parse_args()
 

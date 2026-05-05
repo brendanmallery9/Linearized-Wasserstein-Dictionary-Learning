@@ -30,6 +30,7 @@ datasets/**/.DS_Store
 datasets/**/encoded_codes.pt
 2D_WDL_results/
 logs/
+experiments/results/
 hyperspec_images/
 
 tmp*.json
