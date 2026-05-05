@@ -4,6 +4,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
 from common import REPO_ROOT, stream_command, timestamp, write_json
 
@@ -21,13 +22,13 @@ PRESETS = {
     },
     "local": {
         "max_per_digit": 10,
-        "base_supp_size": 100,
+        "base_supp_size": 400,
         "atoms": 10,
-        "lista_steps": 10,
-        "epochs": 20,
-        "batch_size": 64,
-        "heitz_sinkhorn_iters": 5,
-        "heitz_max_optim_iter": 20,
+        "lista_steps": 20,
+        "epochs": 500,
+        "batch_size": 256,
+        "heitz_sinkhorn_iters": 25,
+        "heitz_max_optim_iter": 50,
     },
 }
 
@@ -64,6 +65,92 @@ def choose(args: argparse.Namespace, key: str):
     if value is not None:
         return value
     return PRESETS[args.preset][key.replace("-", "_")]
+
+
+def read_jsonl(path: Path) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+    rows = []
+    with path.open() as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                rows.append(json.loads(line))
+    return rows
+
+
+def generate_loss_plot(run_dir: Path) -> dict[str, str | None]:
+    """Plot the recorded method objectives against wall-clock time."""
+    heitz_history = read_jsonl(run_dir / "heitz_wdl" / "history.jsonl")
+    ours_history = read_jsonl(run_dir / "mnist_ot_sae" / "history.jsonl")
+
+    heitz_points = [
+        (row["elapsed_seconds"], row["loss"])
+        for row in heitz_history
+        if row.get("event") == "loss_eval" and "elapsed_seconds" in row and "loss" in row
+    ]
+    ours_points = [
+        (row["elapsed_seconds"], row["train_loss"])
+        for row in ours_history
+        if row.get("event") == "epoch" and "elapsed_seconds" in row and "train_loss" in row
+    ]
+    map_prep_seconds = next(
+        (
+            float(row.get("elapsed_seconds", 0.0))
+            for row in ours_history
+            if row.get("event") == "map_prep"
+        ),
+        None,
+    )
+
+    plot_path = run_dir / "loss_vs_wall_time.png"
+    data_path = run_dir / "loss_vs_wall_time.json"
+    payload = {
+        "metric_note": (
+            "Curves use each method's recorded training/objective loss. "
+            "MNIST OT-SAE epoch times include map-prep offset, so its finite "
+            "loss curve starts after map computation."
+        ),
+        "plot_path": str(plot_path),
+        "heitz_wdl": [
+            {"elapsed_seconds": t, "loss": loss}
+            for t, loss in heitz_points
+        ],
+        "mnist_ot_sae": [
+            {"elapsed_seconds": t, "loss": loss}
+            for t, loss in ours_points
+        ],
+        "mnist_ot_sae_map_prep_seconds": map_prep_seconds,
+    }
+    write_json(data_path, payload)
+
+    if not heitz_points and not ours_points:
+        return {"plot_path": None, "data_path": str(data_path)}
+
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    fig, ax = plt.subplots(figsize=(8, 5), constrained_layout=True)
+    if heitz_points:
+        x, y = zip(*heitz_points)
+        ax.plot(x, y, marker="o", markersize=3, linewidth=1.6, label="Heitz WDL")
+    if ours_points:
+        x, y = zip(*ours_points)
+        ax.plot(x, y, marker="o", markersize=2, linewidth=1.8, label="MNIST OT-SAE")
+    if map_prep_seconds is not None and map_prep_seconds > 0:
+        ax.axvspan(0, map_prep_seconds, color="0.9", alpha=0.8, label="OT-SAE map prep")
+        ax.axvline(map_prep_seconds, color="0.45", linestyle="--", linewidth=1)
+
+    ax.set_xlabel("Wall time (seconds)")
+    ax.set_ylabel("Recorded objective loss")
+    ax.set_title("Wall Time vs. Loss")
+    ax.grid(True, alpha=0.25)
+    ax.legend()
+    fig.savefig(plot_path, dpi=180)
+    plt.close(fig)
+    return {"plot_path": str(plot_path), "data_path": str(data_path)}
 
 
 def main() -> None:
@@ -190,11 +277,20 @@ def main() -> None:
             )
             sys.exit(returncode)
 
+    loss_plot = generate_loss_plot(run_dir)
+
     write_json(
         run_dir / "comparison_summary.json",
-        {"config": config, "results": results, "shared_eval": shared_eval},
+        {
+            "config": config,
+            "results": results,
+            "shared_eval": shared_eval,
+            "loss_plot": loss_plot,
+        },
     )
     print(f"\nComparison outputs: {run_dir}")
+    if loss_plot.get("plot_path"):
+        print(f"Loss plot: {loss_plot['plot_path']}")
 
 
 if __name__ == "__main__":

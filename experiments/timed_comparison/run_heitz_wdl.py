@@ -68,6 +68,97 @@ def apply_noavx_fallback(source_dir: Path) -> bool:
     return True
 
 
+def apply_quiet_logging_patch(source_dir: Path) -> bool:
+    """Reduce Heitz runtime output to losses and accepted iterations."""
+    changed = False
+    main_path = source_dir / "cpp" / "main_dictionary_learning.cpp"
+    inverse_path = source_dir / "cpp" / "inverseWasserstein.h"
+
+    main_text = main_path.read_text()
+    init_dump = (
+        '\t// Display initialization\n'
+        '\tstd::cout<<"Initialization (just weights+20): "<<std::endl;\n'
+        '\tfor (int i=0; i<K*P+20; i++) {\n'
+        '\t\tstd::cout<<variables[i]<<" ";\n'
+        '\t}\n'
+        '\tstd::cout<<std::endl;\n'
+    )
+    init_quiet = (
+        '\t// Display initialization\n'
+        '\tstd::cout<<"Initialization complete: samples="<<P<<" atoms="<<K<<" variables="<<variables.size()<<std::endl;\n'
+    )
+    if init_dump in main_text:
+        main_text = main_text.replace(init_dump, init_quiet)
+        changed = True
+
+    solution_dump = (
+        '\t// Display final solution\n'
+        '\tstd::cout<<"solution (just weights+20): "<<std::endl;\n'
+        '\tfor (int i=0; i<K*P+20; i++) {\n'
+        '\t\tstd::cout<<variables[i]<<" ";\n'
+        '\t}\n'
+        '\tstd::cout<<std::endl;\n'
+    )
+    solution_quiet = (
+        '\t// Display final solution\n'
+        '\tstd::cout<<"solution ready"<<std::endl;\n'
+    )
+    if solution_dump in main_text:
+        main_text = main_text.replace(solution_dump, solution_quiet)
+        changed = True
+    main_path.write_text(main_text)
+
+    inverse_text = inverse_path.read_text()
+    bar_print = '\t\t\tstd::cout<<"|"<<std::flush;\n'
+    if bar_print in inverse_text:
+        inverse_text = inverse_text.replace(bar_print, "")
+        changed = True
+
+    loss_print = (
+        '\t\tstd::cout<<std::endl;\n'
+        '\t\tstd::cout<<"loss: "<<lossVal<<" \\tstep: "<<step<<std::endl;\n'
+    )
+    loss_quiet = (
+        '\t\tstd::cout<<"loss_eval iteration="<<regression->iteration<<" loss: "<<lossVal<<" \\tstep: "<<step<<std::endl;\n'
+    )
+    if loss_print in inverse_text:
+        inverse_text = inverse_text.replace(loss_print, loss_quiet)
+        changed = True
+
+    new_iter_print = '\t\tstd::cout<<"new iter-----------------"<<std::endl;\n'
+    if new_iter_print in inverse_text:
+        inverse_text = inverse_text.replace(new_iter_print, "")
+        changed = True
+
+    progress_dump = (
+        '\t\tif(regression->warmRestart)\n'
+        '\t\t\tprintf("LBFGS Iteration %d, total iterations %d :\\n", k,regression->iteration);\n'
+        '\t\telse\n'
+        '\t\t\tprintf("Iteration %d:\\n", k);\n'
+        '\t\tprintf("time elapsed: %f (s)\\n", regression->chrono.GetDiffMs()*0.001);\n'
+    )
+    progress_quiet = (
+        '\t\tif(regression->warmRestart)\n'
+        '\t\t\tprintf("LBFGS Iteration %d, total iterations %d, loss: %f, elapsed_seconds: %f\\n", k,regression->iteration, fx, regression->chrono.GetDiffMs()*0.001);\n'
+        '\t\telse\n'
+        '\t\t\tprintf("Iteration %d, loss: %f, elapsed_seconds: %f\\n", k, fx, regression->chrono.GetDiffMs()*0.001);\n'
+    )
+    if progress_dump in inverse_text:
+        inverse_text = inverse_text.replace(progress_dump, progress_quiet)
+        changed = True
+
+    weights_dump_start = '\t\t// Display fitting variables\n'
+    weights_dump_end = '\t\treturn 0;\n'
+    if weights_dump_start in inverse_text:
+        start = inverse_text.index(weights_dump_start)
+        end = inverse_text.index(weights_dump_end, start)
+        inverse_text = inverse_text[:start] + "\t\treturn 0;\n" + inverse_text[end + len(weights_dump_end):]
+        changed = True
+
+    inverse_path.write_text(inverse_text)
+    return changed
+
+
 def default_avx_mode() -> str:
     # Apple Silicon has no AVX; Rosetta reports x86_64 but sysctl still says
     # AVX is unavailable.
@@ -163,6 +254,7 @@ def main() -> None:
         input_dir = Path(data_metadata["image_dir"])
 
     source_commit = clone_or_reuse_source(source_dir, args.clone_url, args.commit)
+    apply_quiet_logging_patch(source_dir)
     avx_mode = default_avx_mode() if args.avx == "auto" else args.avx
     binary = build_binary(source_dir, build_dir, avx_mode=avx_mode, with_openmp=args.with_openmp)
 
