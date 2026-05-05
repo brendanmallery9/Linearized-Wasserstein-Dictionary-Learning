@@ -71,7 +71,7 @@ def sorted_input_records(metadata_path: Path) -> list[dict]:
     return records
 
 
-def evaluate_heitz(run_dir: Path, records: list[dict]) -> tuple[list[dict], dict]:
+def evaluate_heitz(run_dir: Path, records: list[dict], method_label: str = "heitz_wdl") -> tuple[list[dict], dict]:
     output_dir = run_dir / "outputs"
     rows: list[dict] = []
     for record in records:
@@ -84,7 +84,7 @@ def evaluate_heitz(run_dir: Path, records: list[dict]) -> tuple[list[dict], dict
         recon_points, recon_masses = image_histogram_measure(fitting_path)
         metrics = ot_reconstruction_error(target_points, target_masses, recon_points, recon_masses)
         rows.append({
-            "method": "heitz_wdl",
+            "method": method_label,
             "shared_index": idx,
             "digit": record["digit"],
             "sample_index": record["sample_index"],
@@ -129,7 +129,12 @@ def build_mnist_sae_model(config: dict, checkpoint_path: Path, device: torch.dev
     return model, X, maps
 
 
-def evaluate_ours(run_dir: Path, records: list[dict], device_str: str) -> tuple[list[dict], dict]:
+def evaluate_ours(
+    run_dir: Path,
+    records: list[dict],
+    device_str: str,
+    method_label: str = "mnist_ot_sae",
+) -> tuple[list[dict], dict]:
     output_dir = run_dir / "outputs"
     config = json.loads((output_dir / "config.json").read_text())
     eps = config["epsilons"][0]
@@ -164,7 +169,7 @@ def evaluate_ours(run_dir: Path, records: list[dict], device_str: str) -> tuple[
         recon_points, recon_masses = uniform_point_measure(recon_points_raw)
         metrics = ot_reconstruction_error(target_points, target_masses, recon_points, recon_masses)
         rows.append({
-            "method": "mnist_ot_sae",
+            "method": method_label,
             "shared_index": record["shared_index"],
             "digit": record["digit"],
             "sample_index": record["sample_index"],
@@ -198,6 +203,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", type=Path, default=None)
     parser.add_argument("--device", choices=["cpu", "cuda", "mps"], default="cpu")
     parser.add_argument("--methods", nargs="+", choices=["heitz", "ours"], default=["heitz", "ours"])
+    parser.add_argument("--metadata-path", type=Path, default=None,
+                        help="Input PNG metadata. Defaults to <comparison-dir>/heitz_wdl/data/mnist_png/metadata.json.")
+    parser.add_argument("--heitz-run-dir", type=Path, default=None,
+                        help="Heitz run directory. Defaults to <comparison-dir>/heitz_wdl.")
+    parser.add_argument("--ours-run-dir", type=Path, default=None,
+                        help="OT-SAE run directory. Defaults to <comparison-dir>/mnist_ot_sae.")
+    parser.add_argument("--heitz-label", default="heitz_wdl")
+    parser.add_argument("--ours-label", default="mnist_ot_sae")
     return parser.parse_args()
 
 
@@ -205,20 +218,25 @@ def main() -> None:
     args = parse_args()
     comparison_dir = args.comparison_dir.resolve()
     output_path = args.output or (comparison_dir / "shared_ot_reconstruction.json")
-    records = sorted_input_records(comparison_dir / "heitz_wdl" / "data" / "mnist_png" / "metadata.json")
+    metadata_path = args.metadata_path or (
+        comparison_dir / "heitz_wdl" / "data" / "mnist_png" / "metadata.json"
+    )
+    records = sorted_input_records(metadata_path.resolve())
+    heitz_run_dir = (args.heitz_run_dir or (comparison_dir / "heitz_wdl")).resolve()
+    ours_run_dir = (args.ours_run_dir or (comparison_dir / "mnist_ot_sae")).resolve()
 
     per_method: dict[str, dict] = {}
     per_sample: list[dict] = []
 
-    if "heitz" in args.methods and (comparison_dir / "heitz_wdl" / "summary.json").exists():
-        rows, summary = evaluate_heitz(comparison_dir / "heitz_wdl", records)
+    if "heitz" in args.methods and (heitz_run_dir / "summary.json").exists():
+        rows, summary = evaluate_heitz(heitz_run_dir, records, args.heitz_label)
         per_sample.extend(rows)
-        per_method["heitz_wdl"] = summary
+        per_method[args.heitz_label] = summary
 
-    if "ours" in args.methods and (comparison_dir / "mnist_ot_sae" / "summary.json").exists():
-        rows, summary = evaluate_ours(comparison_dir / "mnist_ot_sae", records, args.device)
+    if "ours" in args.methods and (ours_run_dir / "summary.json").exists():
+        rows, summary = evaluate_ours(ours_run_dir, records, args.device, args.ours_label)
         per_sample.extend(rows)
-        per_method["mnist_ot_sae"] = summary
+        per_method[args.ours_label] = summary
 
     payload = {
         "metric": {
@@ -233,6 +251,7 @@ def main() -> None:
             ],
         },
         "comparison_dir": str(comparison_dir),
+        "metadata_path": str(metadata_path.resolve()),
         "per_method": per_method,
         "per_sample": per_sample,
     }
@@ -242,4 +261,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

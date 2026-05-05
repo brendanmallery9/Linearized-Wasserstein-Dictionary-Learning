@@ -35,6 +35,26 @@ python experiments/timed_comparison/run_mnist_comparison.py \
   --heitz-avx on
 ```
 
+Heitz parameter sweep with CPU and CUDA OT-SAE runs:
+
+```bash
+python experiments/timed_comparison/run_mnist_heitz_sweep.py \
+  --heitz-avx on
+```
+
+The sweep runs four Heitz settings:
+
+- `gamma=0.5, sinkhorn_iters=5, max_optim_iter=500`
+- `gamma=0.5, sinkhorn_iters=25, max_optim_iter=500`
+- `gamma=2.0, sinkhorn_iters=5, max_optim_iter=500`
+- `gamma=2.0, sinkhorn_iters=25, max_optim_iter=500`
+
+It also runs `mnist_ot_sae` on CPU and CUDA for up to 500 epochs.  Each method
+stops when either wall-clock time exceeds one hour or the moving average loss
+over 10 iterations/epochs fails to improve by more than `1e-5`.  The final
+sweep output is `summary_table.csv`, `summary_table.pkl`, and
+`summary_table.png`; the old sweep loss-curve PNG is no longer generated.
+
 Useful outputs:
 
 - `manifest.json`: common benchmark parameters

@@ -174,6 +174,9 @@ DEFAULT_CONFIG = dict(
     weight_decay=0.1,
     scheduler="none",       # "none" or "cosine"
     lr_min=0.0,             # minimum lr for cosine scheduler
+    max_elapsed_seconds=None,
+    plateau_window=0,
+    plateau_min_delta=0.0,
 
     # Experiment grid
     epsilons=[0.025],
@@ -292,10 +295,22 @@ def train_one_model(model, train_loader, test_loader, config, device):
     history_path = config.get("history_path")
     history_every = int(config.get("history_every", 1) or 1)
     history_time_offset = float(config.get("history_time_offset", 0.0) or 0.0)
+    max_elapsed_seconds = config.get("max_elapsed_seconds")
+    if max_elapsed_seconds is not None:
+        max_elapsed_seconds = float(max_elapsed_seconds)
+        if max_elapsed_seconds <= 0:
+            max_elapsed_seconds = None
+    plateau_window = int(config.get("plateau_window", 0) or 0)
+    plateau_min_delta = float(config.get("plateau_min_delta", 0.0) or 0.0)
     if history_path:
         Path(history_path).parent.mkdir(parents=True, exist_ok=True)
     train_start = time.monotonic()
     global_step = 0
+    epoch_losses = []
+    best_plateau_average = None
+    termination_reason = "max_epochs"
+    termination_elapsed_seconds = history_time_offset
+    epochs_completed = 0
     for epoch in range(config["epochs"]):
         # Epsilon annealing
         if anneal and eps_start is not None and eps_end is not None:
@@ -343,6 +358,9 @@ def train_one_model(model, train_loader, test_loader, config, device):
             scheduler.step()
 
         avg_loss = epoch_loss / epoch_steps
+        epoch_losses.append(avg_loss)
+        train_elapsed = time.monotonic() - train_start
+        total_elapsed = history_time_offset + train_elapsed
         should_record = (
             history_path
             and (epoch == 0
@@ -350,7 +368,6 @@ def train_one_model(model, train_loader, test_loader, config, device):
                  or epoch + 1 == config["epochs"])
         )
         if should_record:
-            train_elapsed = time.monotonic() - train_start
             event = {
                 "event": "epoch",
                 "run_name": config.get("name", ""),
@@ -358,7 +375,7 @@ def train_one_model(model, train_loader, test_loader, config, device):
                 "epochs": config["epochs"],
                 "global_step": global_step,
                 "train_elapsed_seconds": train_elapsed,
-                "elapsed_seconds": history_time_offset + train_elapsed,
+                "elapsed_seconds": total_elapsed,
                 "train_loss": avg_loss,
                 "lr": opt.param_groups[0]["lr"],
                 "eps": float(cur_eps),
@@ -373,6 +390,52 @@ def train_one_model(model, train_loader, test_loader, config, device):
             print(f"{prefix}Epoch {epoch+1:4d}/{config['epochs']}  loss={avg_loss:.6f}  "
                   f"lr={lr_now:.2e}  eps={cur_eps:.4g}  c={c_eff:.4g}", flush=True)
 
+        epochs_completed = epoch + 1
+        termination_elapsed_seconds = total_elapsed
+        stop_reason = None
+        if max_elapsed_seconds is not None and total_elapsed >= max_elapsed_seconds:
+            stop_reason = "max_elapsed_seconds"
+        elif plateau_window > 0 and len(epoch_losses) >= plateau_window:
+            window_average = sum(epoch_losses[-plateau_window:]) / plateau_window
+            if best_plateau_average is None:
+                best_plateau_average = window_average
+            elif best_plateau_average - window_average > plateau_min_delta:
+                best_plateau_average = window_average
+            else:
+                stop_reason = "loss_plateau"
+
+        if stop_reason is not None:
+            termination_reason = stop_reason
+            print(
+                f"Stopping at epoch {epochs_completed}: {termination_reason} "
+                f"(elapsed={termination_elapsed_seconds:.1f}s)",
+                flush=True,
+            )
+            if history_path:
+                with open(history_path, "a") as f:
+                    f.write(json.dumps({
+                        "event": "termination",
+                        "run_name": config.get("name", ""),
+                        "reason": termination_reason,
+                        "epoch": epochs_completed,
+                        "epochs": config["epochs"],
+                        "elapsed_seconds": termination_elapsed_seconds,
+                        "train_loss": avg_loss,
+                    }) + "\n")
+            break
+    else:
+        if history_path:
+            with open(history_path, "a") as f:
+                f.write(json.dumps({
+                    "event": "termination",
+                    "run_name": config.get("name", ""),
+                    "reason": termination_reason,
+                    "epoch": epochs_completed,
+                    "epochs": config["epochs"],
+                    "elapsed_seconds": termination_elapsed_seconds,
+                    "train_loss": epoch_losses[-1] if epoch_losses else None,
+                }) + "\n")
+
     # Final evaluation
     train_metrics = compute_losses(model, train_loader, c, device)
     test_metrics = compute_losses(model, test_loader, c, device)
@@ -386,6 +449,11 @@ def train_one_model(model, train_loader, test_loader, config, device):
         "test_total_loss": test_metrics["total_loss"],
         "test_mean_l1": test_metrics["mean_l1"],
         "test_mean_active": test_metrics["mean_active"],
+        "epochs_completed": epochs_completed,
+        "requested_epochs": config["epochs"],
+        "termination_reason": termination_reason,
+        "termination_elapsed_seconds": termination_elapsed_seconds,
+        "final_train_loss": epoch_losses[-1] if epoch_losses else None,
     }
 
 
@@ -476,6 +544,10 @@ def run_all_experiments(config=None):
             "device": str(device),
             "m": config["m"],
             "epochs": config["epochs"],
+            "epochs_completed": metrics["epochs_completed"],
+            "requested_epochs": metrics["requested_epochs"],
+            "termination_reason": metrics["termination_reason"],
+            "termination_elapsed_seconds": metrics["termination_elapsed_seconds"],
             "lr": config["lr"],
             "elapsed_seconds": round(elapsed, 1),
             **metrics,
@@ -559,6 +631,12 @@ if __name__ == "__main__":
                         help="Record history every N epochs when --history_path is set")
     parser.add_argument("--history_time_offset", type=float, default=0.0,
                         help="Seconds to add to history elapsed_seconds, e.g. map-prep time")
+    parser.add_argument("--max_elapsed_seconds", type=float, default=None,
+                        help="Stop after this many total elapsed seconds, including history offset")
+    parser.add_argument("--plateau_window", type=int, default=0,
+                        help="Stop when the moving average over this many epochs plateaus")
+    parser.add_argument("--plateau_min_delta", type=float, default=0.0,
+                        help="Required moving-average loss improvement to avoid plateau stopping")
 
     args = parser.parse_args()
 

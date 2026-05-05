@@ -84,6 +84,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--eps", type=float, default=0.025)
     parser.add_argument("--c", type=float, default=0.0001)
     parser.add_argument("--history-every", type=int, default=1)
+    parser.add_argument("--max-elapsed-seconds", type=float, default=None)
+    parser.add_argument("--plateau-window", type=int, default=0)
+    parser.add_argument("--plateau-min-delta", type=float, default=0.0)
     parser.add_argument("--force-output", action="store_true")
     return parser.parse_args()
 
@@ -171,6 +174,11 @@ def main() -> None:
         "--history_every", args.history_every,
         "--history_time_offset", prep_elapsed,
     ]
+    if args.max_elapsed_seconds is not None:
+        train_cmd.extend(["--max_elapsed_seconds", args.max_elapsed_seconds])
+    if args.plateau_window:
+        train_cmd.extend(["--plateau_window", args.plateau_window])
+        train_cmd.extend(["--plateau_min_delta", args.plateau_min_delta])
     returncode, train_elapsed = stream_command(
         train_cmd,
         cwd=REPO_ROOT,
@@ -180,11 +188,30 @@ def main() -> None:
         sys.exit(returncode)
 
     total_elapsed = prep_elapsed + train_elapsed
+    metrics_path = output_dir / "metrics.json"
+    first_result = None
+    if metrics_path.exists():
+        metrics = json.loads(metrics_path.read_text())
+        if metrics:
+            first_result = metrics[0]
+
     summary = {
         "method": "mnist_ot_sae",
         "elapsed_seconds": total_elapsed,
         "map_prep_elapsed_seconds": prep_elapsed,
         "train_elapsed_seconds": train_elapsed,
+        "termination_reason": (
+            first_result.get("termination_reason") if first_result else None
+        ),
+        "termination_elapsed_seconds": (
+            first_result.get("termination_elapsed_seconds") if first_result else total_elapsed
+        ),
+        "epochs_completed": (
+            first_result.get("epochs_completed") if first_result else None
+        ),
+        "final_train_loss": (
+            first_result.get("final_train_loss") if first_result else None
+        ),
         "history_path": str(history_path),
         "run_dir": str(run_dir),
         "data_dir": str(data_dir),
@@ -207,6 +234,9 @@ def main() -> None:
             "eps": args.eps,
             "c": args.c,
             "map_mode": args.map_mode,
+            "max_elapsed_seconds": args.max_elapsed_seconds,
+            "plateau_window": args.plateau_window,
+            "plateau_min_delta": args.plateau_min_delta,
         },
         "commands": {
             "prepare": [str(part) for part in prepare_cmd],
@@ -218,4 +248,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
