@@ -54,6 +54,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--heitz-gamma", type=float, default=2.0)
     parser.add_argument("--heitz-scale-dict-factor", type=float, default=100.0)
     parser.add_argument("--heitz-avx", choices=["auto", "on", "off"], default="auto")
+    parser.add_argument("--skip-shared-eval", action="store_true",
+                        help="Skip shared OT reconstruction evaluation after both methods finish")
     return parser.parse_args()
 
 
@@ -155,7 +157,43 @@ def main() -> None:
             write_json(run_dir / "comparison_summary.json", {"config": config, "results": results})
             sys.exit(returncode)
 
-    write_json(run_dir / "comparison_summary.json", {"config": config, "results": results})
+    shared_eval = None
+    if (
+        not args.skip_shared_eval
+        and (run_dir / "heitz_wdl" / "summary.json").exists()
+        and (run_dir / "mnist_ot_sae" / "summary.json").exists()
+    ):
+        print("\n=== Running shared OT reconstruction evaluation ===", flush=True)
+        eval_device = config["device"] if config["device"] in {"cuda", "mps"} else "cpu"
+        shared_eval_path = run_dir / "shared_ot_reconstruction.json"
+        eval_cmd = [
+            sys.executable,
+            REPO_ROOT / "experiments" / "timed_comparison" / "evaluate_mnist_ot_reconstruction.py",
+            "--comparison-dir", run_dir,
+            "--output", shared_eval_path,
+            "--device", eval_device,
+        ]
+        returncode, elapsed = stream_command(
+            eval_cmd,
+            cwd=REPO_ROOT,
+            log_path=run_dir / "shared_eval_wrapper.log",
+        )
+        shared_eval = {
+            "returncode": returncode,
+            "wrapper_elapsed_seconds": elapsed,
+            "output_path": str(shared_eval_path),
+        }
+        if returncode != 0:
+            write_json(
+                run_dir / "comparison_summary.json",
+                {"config": config, "results": results, "shared_eval": shared_eval},
+            )
+            sys.exit(returncode)
+
+    write_json(
+        run_dir / "comparison_summary.json",
+        {"config": config, "results": results, "shared_eval": shared_eval},
+    )
     print(f"\nComparison outputs: {run_dir}")
 
 
