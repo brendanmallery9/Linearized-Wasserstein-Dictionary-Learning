@@ -159,6 +159,30 @@ def apply_quiet_logging_patch(source_dir: Path) -> bool:
     return changed
 
 
+def apply_linux_cxx_link_patch(source_dir: Path) -> bool:
+    """Make the mixed C/C++ Heitz target link reliably on Linux clusters."""
+    cmake_path = source_dir / "cpp" / "CMakeLists.txt"
+    text = cmake_path.read_text()
+    marker = "Codex Linux CXX link patch"
+    if marker in text:
+        return False
+
+    needle = "    target_link_libraries(app_dictionary_learning ${ADDITIONAL_LINKER_FLAG})\n"
+    replacement = (
+        needle +
+        f"    # {marker}: keep mixed C/C++ target on the C++ linker and\n"
+        "    # explicitly add libstdc++ on Linux toolchains that omit it.\n"
+        "    set_target_properties(app_dictionary_learning PROPERTIES LINKER_LANGUAGE CXX)\n"
+        "    if(CMAKE_SYSTEM_NAME STREQUAL \"Linux\")\n"
+        "        target_link_libraries(app_dictionary_learning stdc++)\n"
+        "    endif()\n"
+    )
+    if needle not in text:
+        raise RuntimeError(f"Could not find app link target in {cmake_path}")
+    cmake_path.write_text(text.replace(needle, replacement))
+    return True
+
+
 def default_avx_mode() -> str:
     # Apple Silicon has no AVX; Rosetta reports x86_64 but sysctl still says
     # AVX is unavailable.
@@ -255,6 +279,7 @@ def main() -> None:
 
     source_commit = clone_or_reuse_source(source_dir, args.clone_url, args.commit)
     apply_quiet_logging_patch(source_dir)
+    apply_linux_cxx_link_patch(source_dir)
     avx_mode = default_avx_mode() if args.avx == "auto" else args.avx
     binary = build_binary(source_dir, build_dir, avx_mode=avx_mode, with_openmp=args.with_openmp)
 
