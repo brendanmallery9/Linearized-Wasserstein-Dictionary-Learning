@@ -84,6 +84,11 @@ def write_summary_table(df: pd.DataFrame, csv_path: Path, pickle_path: Path, png
     display_df["clock_time_at_termination"] = display_df["clock_time_at_termination"].map(
         lambda value: f"{value:.1f}"
     )
+    for column in ("map_prep_elapsed_seconds", "train_elapsed_seconds"):
+        if column in display_df:
+            display_df[column] = display_df[column].map(
+                lambda value: "" if pd.isna(value) else f"{value:.1f}"
+            )
 
     fig_height = max(2.2, 0.42 * (len(display_df) + 1))
     fig, ax = plt.subplots(figsize=(11, fig_height), constrained_layout=True)
@@ -142,7 +147,6 @@ def main() -> None:
     eval_dir.mkdir(parents=True, exist_ok=True)
 
     shared_png_dir = run_dir / "shared_mnist_png"
-    shared_ot_dir = run_dir / "shared_mnist_ot"
     metadata_path = shared_png_dir / "metadata.json"
 
     manifest = {
@@ -157,6 +161,13 @@ def main() -> None:
         "lr": args.lr,
         "seed": args.seed,
         "otsae_devices": args.otsae_devices,
+        "otsae_map_timing": {
+            "mode": "force_per_device",
+            "description": (
+                "Each OT-SAE device run recomputes MNIST OT maps in its own run "
+                "directory; SAE clock_time_at_termination includes map prep time."
+            ),
+        },
         "stopping": {
             "max_elapsed_seconds": args.max_elapsed_seconds,
             "plateau_window": args.plateau_window,
@@ -181,19 +192,6 @@ def main() -> None:
             "--force",
         ],
         log_path=log_dir / "prepare_mnist_png.log",
-    )
-
-    run_or_exit(
-        "Preparing shared MNIST OT maps",
-        [
-            sys.executable,
-            REPO_ROOT / "mnist" / "pipeline" / "prepare_mnist_ot.py",
-            "--output_dir", shared_ot_dir,
-            "--base_supp_size", args.base_supp_size,
-            "--max_per_digit", args.max_per_digit,
-            "--seed", args.seed,
-        ],
-        log_path=log_dir / "prepare_mnist_ot.log",
     )
 
     rows: list[dict[str, Any]] = []
@@ -245,19 +243,22 @@ def main() -> None:
             "clock_time_at_termination": summary.get(
                 "termination_elapsed_seconds", summary.get("elapsed_seconds")
             ),
+            "map_prep_elapsed_seconds": None,
+            "train_elapsed_seconds": None,
         })
 
     for device in args.otsae_devices:
         method_label = f"mnist_ot_sae_{device}"
         method_dir = run_dir / method_label
+        method_ot_dir = method_dir / "data" / "mnist_ot"
         run_or_exit(
             f"Running {method_label}",
             [
                 sys.executable,
                 REPO_ROOT / "experiments" / "timed_comparison" / "run_mnist_sae_timed.py",
                 "--run-dir", method_dir,
-                "--data-dir", shared_ot_dir,
-                "--map-mode", "skip",
+                "--data-dir", method_ot_dir,
+                "--map-mode", "force",
                 "--device", device,
                 "--seed", args.seed,
                 "--base-supp-size", args.base_supp_size,
@@ -295,6 +296,8 @@ def main() -> None:
             "clock_time_at_termination": summary.get(
                 "termination_elapsed_seconds", summary.get("elapsed_seconds")
             ),
+            "map_prep_elapsed_seconds": summary.get("map_prep_elapsed_seconds"),
+            "train_elapsed_seconds": summary.get("train_elapsed_seconds"),
         })
 
     table_df = pd.DataFrame(rows, columns=[
@@ -302,6 +305,8 @@ def main() -> None:
         "loss",
         "epochs_at_termination",
         "clock_time_at_termination",
+        "map_prep_elapsed_seconds",
+        "train_elapsed_seconds",
     ])
     write_summary_table(
         table_df,
