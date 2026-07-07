@@ -163,6 +163,11 @@ python experiments/timed_comparison/run_timing_suite.py \
   --heitz-avx on
 ```
 
+The `local` preset keeps the Heitz-facing Pavia and MNIST datasets near the
+old timed-comparison scale: `100` Pavia spectra and `10` MNIST images per digit
+(`100` MNIST images total).  The Gaussian dimension sweep still uses `100`
+synthetic measures per dimension because it does not run Heitz.
+
 Run one experiment at a time:
 
 ```bash
