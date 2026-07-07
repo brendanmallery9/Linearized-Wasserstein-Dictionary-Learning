@@ -72,3 +72,120 @@ reconstructions are the uniform pushforwards of the reconstructed transport maps
 On Apple Silicon, the Heitz wrapper defaults to `--heitz-avx off` and applies a
 small scalar `dotp_full` fallback in the cloned external checkout.  That is fine
 for local integration tests; use an AVX-capable x86 remote for final timing.
+
+## Three-Experiment Timing Suite
+
+`run_timing_suite.py` runs the newer comparison suite:
+
+- Pavia 1D subset: HSI 1D OT-map SAE, EBCM, potential SAE, and Heitz
+- MNIST digits: EBCM, potential SAE, and Heitz
+- synthetic centered Gaussian measures: EBCM vs potential SAE over dimensions
+  `1, 5, 10, 20, 40`
+
+In plain terms, the suite does the following.
+
+### Experiment 1: Pavia 1D Spectra
+
+This experiment uses a small random subset of pixels from the Pavia
+hyperspectral image.  Each pixel is treated as a 1D distribution over spectral
+bands: bright bands get more mass, dim bands get less.
+
+Steps:
+
+1. Pick a repeatable subset of Pavia pixels using the random seed.
+2. Turn each selected spectrum into a probability distribution.
+3. Build several embedded versions of the same spectra:
+   - the HSI 1D method computes ordinary 1D optimal transport maps,
+   - EBCM computes entropic transport maps for each requested epsilon,
+   - the potential method computes OT potential vectors.
+4. Train the matching autoencoder/dictionary model on each embedding.
+5. For HSI 1D, EBCM, and Heitz, reconstruct measures and report mean
+   `W_2^2` reconstruction error.
+6. For the potential method, report reconstruction MSE in potential space,
+   because decoded potentials are not directly measures.
+7. Record embedding time, training time, stopping epoch/iteration, and error.
+
+### Experiment 2: MNIST Digits
+
+This experiment uses MNIST digit images as 2D probability distributions.  Each
+nonzero pixel is a support point, and brighter pixels carry more mass.
+
+Steps:
+
+1. Pick a repeatable subset of MNIST digit images.
+2. Save the same images as PNGs for Heitz.
+3. Sample a fixed base measure with the requested number of support points.
+4. Build EBCM embeddings by computing entropic transport maps from the base
+   measure to each digit, once for each requested epsilon.
+5. Build potential embeddings by computing an OT potential vector for each
+   digit.
+6. Train EBCM and potential autoencoders on their respective embeddings.
+7. Run Heitz on the same digit PNGs, for the requested gamma values.
+8. Report mean `W_2^2` reconstruction error for EBCM and Heitz.
+9. Report potential-space reconstruction MSE for the potential method.
+10. Record embedding time, training time, stopping epoch/iteration, and error.
+
+### Experiment 3: Centered Gaussian Measures
+
+This experiment is mainly a dimension-scaling test.  It generates synthetic
+Gaussian point-cloud measures in dimensions `1, 5, 10, 20, 40`.  The Gaussians
+are centered at zero, but their covariance shapes vary.
+
+Steps:
+
+1. For each dimension, generate and cache a repeatable synthetic dataset.
+2. Use one fixed Gaussian point cloud as the source/base measure.
+3. Generate several centered Gaussian target measures with random covariance
+   matrices normalized to variance scale 1.
+4. For EBCM, compute entropic transport maps for epsilons `0.1`, `0.05`, and
+   `0.2 / dimension`.
+5. For the potential method, compute OT potential vectors for the same target
+   measures.
+6. Train the EBCM and potential autoencoders.
+7. Compare wall-clock time as dimension increases.
+8. Report embedded reconstruction losses, not `W_2^2`, because this experiment
+   is about timing as a function of dimension.
+
+Quick Python-side smoke test, without building/running Heitz:
+
+```bash
+python experiments/timed_comparison/run_timing_suite.py \
+  --preset smoke \
+  --skip-heitz
+```
+
+Remote CUDA run with Heitz included:
+
+```bash
+python experiments/timed_comparison/run_timing_suite.py \
+  --preset local \
+  --device cuda \
+  --heitz-avx on
+```
+
+Run one experiment at a time:
+
+```bash
+python experiments/timed_comparison/run_timing_suite.py \
+  --experiment mnist \
+  --preset local \
+  --device cuda \
+  --heitz-avx on
+```
+
+The suite writes one table per experiment plus a combined table:
+
+- `pavia1d/timing_table_pavia1d.csv`
+- `mnist/timing_table_mnist.csv`
+- `gaussian/timing_table_gaussian.csv`
+- `timing_table_all.csv`
+
+Embeddings and synthetic Gaussian data are cached under
+`experiments/results/timing_cache` by default.  Use `--force-cache` to recompute
+embeddings and refresh their recorded embedding times.
+
+The table reports `mean_w2_squared` for measure-reconstruction methods in the
+Pavia and MNIST experiments.  Potential-method rows intentionally leave
+`mean_w2_squared` blank and report `embedded_recon_mse`, the reconstruction MSE
+in the potential embedding space.  The Gaussian dimension sweep is a timing
+comparison, so it reports embedded reconstruction losses rather than W2.

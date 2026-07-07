@@ -74,10 +74,10 @@ def brenier_potential(source_points,source_masses, target_points,target_masses, 
         target_points=target_points.numpy()
     if type(source_points)!=np.ndarray:
         source_points=source_points.numpy()
-    if source_masses==None:
+    if source_masses is None:
         n1 = np.shape(source_points)[0]
         source_masses=np.ones(n1)/n1
-    if target_masses==None:
+    if target_masses is None:
         n2 = np.shape(target_points)[0] 
         target_masses=np.ones(n2)/n2 
     M = ot.dist(source_points, target_points,metric='sqeuclidean')
