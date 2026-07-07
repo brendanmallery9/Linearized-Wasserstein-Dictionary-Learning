@@ -31,6 +31,10 @@ datasets/**/encoded_codes.pt
 2D_WDL_results/
 logs/
 experiments/results/
+mnist/results/
+pointcloud/results/
+pointcloud_raw/
+wdl_repo/
 hyperspec_images/
 
 tmp*.json

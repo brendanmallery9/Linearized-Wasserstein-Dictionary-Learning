@@ -1,8 +1,9 @@
 """
-Sparse autoencoder model for transport maps on [0,1]^2.
+Sparse autoencoder models for transport maps on [0,1]^d.
 
-DisplacementFieldSAE works with displacement fields V = T - Id, with
-dictionary atoms parameterized via Gibbs/softmax over a fixed 2D grid Y.
+TransportMapSAE works directly with maps T_{rho->mu}. DisplacementFieldSAE
+works with displacement fields V = T - Id. Both use dictionary atoms
+parameterized via Gibbs/softmax or Sinkhorn maps over a fixed target grid Y.
 
 Dictionary atom parameterization
 --------------------------------
@@ -55,6 +56,21 @@ def make_grid_2d(grid_side=32):
     yy, xx = torch.meshgrid(t, t, indexing="ij")
     Y = torch.stack([xx.reshape(-1), yy.reshape(-1)], dim=1)  # (K, 2)
     return Y
+
+
+def make_grid_nd(grid_side, dim=2):
+    """
+    Uniform grid on [0,1]^dim, with `grid_side` points along each axis.
+
+    Returns:
+        Y: tensor of shape (grid_side**dim, dim).
+    """
+    if dim == 2:
+        return make_grid_2d(grid_side)
+    t = torch.linspace(0, 1, grid_side)
+    axes = [t] * dim
+    mesh = torch.meshgrid(*axes, indexing="ij")
+    return torch.stack([m.reshape(-1) for m in mesh], dim=1)
 
 
 class GibbsAtoms(nn.Module):
@@ -394,6 +410,86 @@ def _build_atoms_module(atoms_type, X, m, eps, grid_side, grid_points, n_sinkhor
                              grid_points=grid_points, n_sinkhorn=n_sinkhorn)
     else:
         raise ValueError(f"Unknown atoms_type: {atoms_type}")
+
+
+class TransportMapSAE(nn.Module):
+    """
+    Sparse autoencoder operating on raw transport maps T_{rho->mu}.
+
+    Encoding (multi-step LISTA):
+        inner_j = <A_j, T>_{L^2(rho)}      where A_j = T_j (or normalized T_j)
+        lam^{(0)} = chi(inner + b^{(0)})
+        lam^{(t+1)} = chi(inner + S^{(t)} @ lam^{(t)} + b^{(t+1)})
+
+    Reconstruction (always with unnormalized atoms):
+        T_hat = sum_j lambda_j * T_j
+
+    Args:
+        X: (n, d) base measure support
+        m: number of dictionary atoms
+        eps: Gibbs/Sinkhorn temperature
+        grid_side: side length of target grid
+        lista_steps: number of LISTA iterations (1 = original single-step)
+        activation_type: "relu", "jumprelu", "topk", or "topk_simplex"
+        normalize_atoms: if True, use L^2(rho)-normalized atoms in the encoder
+    """
+    def __init__(self, X, m, eps, grid_side=32, lista_steps=1, activation_type="relu",
+                 normalize_atoms=False, grid_points=None,
+                 atoms_type="gibbs", n_sinkhorn=30,
+                 topk_k=3, per_atom_gain=False, lateral_init="zeros"):
+        super().__init__()
+        self.atoms_module = _build_atoms_module(
+            atoms_type, X, m, eps, grid_side, grid_points, n_sinkhorn,
+        )
+        self.encoder = LISTAEncoder(
+            m, lista_steps=lista_steps, activation_type=activation_type,
+            topk_k=topk_k, per_atom_gain=per_atom_gain, lateral_init=lateral_init,
+        )
+        self.n = X.shape[0]
+        self.m = m
+        self.normalize_atoms = normalize_atoms
+
+    def encode(self, T, atoms_enc):
+        """
+        Compute encoding coefficients lambda(mu, theta).
+
+        Args:
+            T: (B, n, d) batch of transport maps
+            atoms_enc: (m, n, d) atoms used for encoding
+
+        Returns:
+            lam: (B, m) encoding coefficients
+        """
+        inner = torch.einsum("bnd, mnd -> bm", T, atoms_enc) / self.n
+        return self.encoder(inner)
+
+    def decode(self, lam, atoms):
+        """
+        Reconstruct maps from coefficients.
+
+        Args:
+            lam: (B, m) encoding coefficients
+            atoms: (m, n, d) dictionary atoms
+
+        Returns:
+            T_hat: (B, n, d)
+        """
+        return torch.einsum("bm, mnd -> bnd", lam, atoms)
+
+    def forward(self, T):
+        """
+        Args:
+            T: (B, n, d) batch of transport maps
+
+        Returns:
+            T_hat: (B, n, d) reconstructed maps
+            lam: (B, m) encoding coefficients
+        """
+        atoms = self.atoms_module()
+        atoms_enc = normalize_atoms_l2rho(atoms, self.n) if self.normalize_atoms else atoms
+        lam = self.encode(T, atoms_enc)
+        T_hat = self.decode(lam, atoms)
+        return T_hat, lam
 
 
 class DisplacementFieldSAE(nn.Module):
