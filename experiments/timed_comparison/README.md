@@ -193,6 +193,10 @@ The suite writes one table per experiment plus a combined table:
 - `mnist/timing_table_mnist.csv`
 - `gaussian/timing_table_gaussian.csv`
 - `timing_table_all.csv`
+- `timing_table_all.html`
+
+Each CSV table is also saved as a browser-friendly `.html` table in the same
+directory.
 
 Embeddings and synthetic Gaussian data are cached under
 `experiments/results/timing_cache` by default.  Use `--force-cache` to recompute

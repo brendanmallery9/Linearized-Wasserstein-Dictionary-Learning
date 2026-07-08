@@ -556,14 +556,49 @@ def save_table(rows: list[dict[str, Any]], out_dir: Path, name: str) -> dict[str
     csv_path = out_dir / f"{name}.csv"
     json_path = out_dir / f"{name}.json"
     md_path = out_dir / f"{name}.md"
+    html_path = out_dir / f"{name}.html"
     df = pd.DataFrame(rows)
     df.to_csv(csv_path, index=False)
     write_json(json_path, rows)
     md_path.write_text(df.to_string(index=False) + "\n" if rows else "_No rows_\n")
+    if rows:
+        html_table = df.to_html(index=False, escape=True, float_format=lambda value: f"{value:.6g}")
+    else:
+        html_table = "<p>No rows</p>"
+    html_path.write_text(
+        "\n".join([
+            "<!doctype html>",
+            "<html>",
+            "<head>",
+            "<meta charset=\"utf-8\">",
+            f"<title>{name}</title>",
+            "<style>",
+            "body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin: 24px; color: #111; }",
+            "h1 { font-size: 20px; margin-bottom: 16px; }",
+            ".table-wrap { overflow-x: auto; border: 1px solid #ddd; }",
+            "table { border-collapse: collapse; width: 100%; font-size: 13px; }",
+            "th, td { border: 1px solid #ddd; padding: 6px 8px; text-align: right; white-space: nowrap; }",
+            "th { position: sticky; top: 0; background: #f2f4f7; font-weight: 600; }",
+            "td:first-child, th:first-child, td:nth-child(3), th:nth-child(3) { text-align: left; }",
+            "tr:nth-child(even) { background: #fafafa; }",
+            "</style>",
+            "</head>",
+            "<body>",
+            f"<h1>{name}</h1>",
+            "<div class=\"table-wrap\">",
+            html_table,
+            "</div>",
+            "</body>",
+            "</html>",
+            "",
+        ]),
+        encoding="utf-8",
+    )
     return {
         "csv": str(csv_path),
         "json": str(json_path),
         "markdown": str(md_path),
+        "html": str(html_path),
     }
 
 
@@ -1682,6 +1717,7 @@ def main() -> None:
     })
     print(f"\nTiming suite complete: {run_dir}", flush=True)
     print(f"Combined CSV: {paths['csv']}", flush=True)
+    print(f"Combined HTML table: {paths['html']}", flush=True)
 
 
 if __name__ == "__main__":
