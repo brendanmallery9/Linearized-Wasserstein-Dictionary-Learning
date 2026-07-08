@@ -171,6 +171,11 @@ synthetic measures per dimension because it does not run Heitz.
 The same preset also keeps the neural model size close to the prior timing
 comparison: `10` atoms, LISTA depth `20`, and batch size `256`.
 
+The Pavia 1D HSI row uses the older HSI SAE training recipe except for the
+suite batch size: learning rate `1e-4`, sparsity coefficient `5e-5`,
+AdamW weight decay `1e-4`, cosine LR decay, gradient clipping at `100`, and the
+old mean-activation sparsity penalty.
+
 The default stopping rule matches the prior Heitz/OT-SAE sweep: neural methods
 run for at most `500` epochs, Heitz runs for at most `500` optimization
 iterations, all methods have a one-hour wall-clock cap, and all methods stop

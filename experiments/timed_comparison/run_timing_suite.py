@@ -70,6 +70,15 @@ MNIST_EPSILONS = [0.25, 0.125, 0.025]
 GAUSSIAN_DIMS = [1, 5, 10, 20, 40]
 HEITZ_GAMMAS = [0.5, 2.0]
 
+HSI_LEGACY_SAE = {
+    "lr": 1e-4,
+    "sparsity_coeff": 5e-5,
+    "weight_decay": 1e-4,
+    "scheduler": "cosine",
+    "grad_clip": 100.0,
+    "sparsity_mode": "mean",
+}
+
 
 class TensorOnlyDataset(Dataset):
     def __init__(self, tensor: torch.Tensor):
@@ -321,6 +330,7 @@ def evaluate_generic_recon(
     *,
     device: torch.device,
     sparsity_coeff: float,
+    sparsity_mode: str = "sum_per_sample",
 ) -> dict[str, float]:
     total_recon = 0.0
     total_loss = 0.0
@@ -333,7 +343,12 @@ def evaluate_generic_recon(
             batch = batch.to(device).float()
             xhat, z = model(batch)
             recon_per_sample = ((xhat - batch) ** 2).mean(dim=1)
-            l1_per_sample = z.abs().sum(dim=1)
+            if sparsity_mode == "mean":
+                l1_per_sample = z.abs().mean(dim=1)
+            elif sparsity_mode == "sum_per_sample":
+                l1_per_sample = z.abs().sum(dim=1)
+            else:
+                raise ValueError(f"Unknown sparsity_mode: {sparsity_mode}")
             active_per_sample = (z.abs() > 0).float().sum(dim=1)
             total_recon += float(recon_per_sample.sum().item())
             total_l1 += float(l1_per_sample.sum().item())
@@ -371,6 +386,9 @@ def train_generic_sae(
     plateau_window: int = 0,
     plateau_min_delta: float = 0.0,
     test_fraction: float = 0.1,
+    scheduler: str = "none",
+    grad_clip: float | None = None,
+    sparsity_mode: str = "sum_per_sample",
 ) -> tuple[torch.nn.Module, dict[str, Any], torch.Tensor]:
     train_loader, test_loader, all_loader = make_loaders(
         data,
@@ -385,7 +403,22 @@ def train_generic_sae(
         top_k=top_k,
         lista_steps=lista_steps,
     ).to(device)
-    opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
+    opt = torch.optim.AdamW(
+        model.parameters(),
+        lr=lr,
+        betas=(0.9, 0.999),
+        eps=1e-8,
+        weight_decay=weight_decay,
+    )
+    lr_scheduler = None
+    if scheduler == "cosine":
+        lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            opt,
+            T_max=epochs,
+            eta_min=lr / 1000,
+        )
+    elif scheduler != "none":
+        raise ValueError(f"Unknown scheduler: {scheduler}")
 
     if history_path is not None:
         history_path.parent.mkdir(parents=True, exist_ok=True)
@@ -405,13 +438,23 @@ def train_generic_sae(
             batch = batch.to(device).float()
             xhat, z = model(batch)
             recon = F.mse_loss(xhat, batch, reduction="mean")
-            sparsity = z.abs().sum(dim=1).mean()
+            if sparsity_mode == "mean":
+                sparsity = z.abs().mean()
+            elif sparsity_mode == "sum_per_sample":
+                sparsity = z.abs().sum(dim=1).mean()
+            else:
+                raise ValueError(f"Unknown sparsity_mode: {sparsity_mode}")
             loss = recon + sparsity_coeff * sparsity
             opt.zero_grad(set_to_none=True)
             loss.backward()
+            if grad_clip is not None and grad_clip > 0:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
             opt.step()
             epoch_loss += float(loss.item())
             steps += 1
+
+        if lr_scheduler is not None:
+            lr_scheduler.step()
 
         avg_loss = epoch_loss / max(steps, 1)
         epoch_losses.append(avg_loss)
@@ -427,6 +470,9 @@ def train_generic_sae(
                     "epochs": epochs,
                     "elapsed_seconds": termination_elapsed,
                     "train_loss": avg_loss,
+                    "lr": opt.param_groups[0]["lr"],
+                    "sparsity_coeff": sparsity_coeff,
+                    "sparsity_mode": sparsity_mode,
                 }) + "\n")
         if epoch == 0 or epochs_completed % 10 == 0 or epochs_completed == epochs:
             print(f"[{run_name}] Epoch {epochs_completed:4d}/{epochs} loss={avg_loss:.6f}", flush=True)
@@ -464,18 +510,21 @@ def train_generic_sae(
         train_loader,
         device=device,
         sparsity_coeff=sparsity_coeff,
+        sparsity_mode=sparsity_mode,
     )
     test_metrics = evaluate_generic_recon(
         model,
         test_loader,
         device=device,
         sparsity_coeff=sparsity_coeff,
+        sparsity_mode=sparsity_mode,
     )
     all_metrics = evaluate_generic_recon(
         model,
         all_loader,
         device=device,
         sparsity_coeff=sparsity_coeff,
+        sparsity_mode=sparsity_mode,
     )
     recon = reconstruct_tensor(model, data, device, batch_size)
     metrics = {
@@ -1167,9 +1216,9 @@ def run_pavia1d(args: argparse.Namespace, run_dir: Path, cache_dir: Path, device
         lista_steps=args.lista_steps,
         batch_size=args.batch_size,
         epochs=args.epochs,
-        lr=args.lr,
-        sparsity_coeff=args.sparsity_coeff,
-        weight_decay=args.weight_decay,
+        lr=HSI_LEGACY_SAE["lr"],
+        sparsity_coeff=HSI_LEGACY_SAE["sparsity_coeff"],
+        weight_decay=HSI_LEGACY_SAE["weight_decay"],
         seed=args.seed,
         device=device,
         history_path=hsi_history,
@@ -1179,6 +1228,9 @@ def run_pavia1d(args: argparse.Namespace, run_dir: Path, cache_dir: Path, device
         plateau_window=args.plateau_window,
         plateau_min_delta=args.plateau_min_delta,
         test_fraction=args.test_fraction,
+        scheduler=HSI_LEGACY_SAE["scheduler"],
+        grad_clip=HSI_LEGACY_SAE["grad_clip"],
+        sparsity_mode=HSI_LEGACY_SAE["sparsity_mode"],
     )
     hsi_train_seconds = time.monotonic() - t0
     hsi_recon_maps = hsi_recon.reshape_as(hsi_maps)
@@ -1199,6 +1251,12 @@ def run_pavia1d(args: argparse.Namespace, run_dir: Path, cache_dir: Path, device
         "embedded_recon_mse": hsi_metrics["all_recon_mse"],
         "primary_error": pavia_w2_errors(data, hsi_recon_maps),
         "primary_error_name": "mean_w2_squared",
+        "train_lr": HSI_LEGACY_SAE["lr"],
+        "train_sparsity_coeff": HSI_LEGACY_SAE["sparsity_coeff"],
+        "train_weight_decay": HSI_LEGACY_SAE["weight_decay"],
+        "train_scheduler": HSI_LEGACY_SAE["scheduler"],
+        "train_grad_clip": HSI_LEGACY_SAE["grad_clip"],
+        "train_sparsity_mode": HSI_LEGACY_SAE["sparsity_mode"],
         "artifact": str(hsi_maps_path),
     })
 
@@ -1457,7 +1515,8 @@ def run_mnist(args: argparse.Namespace, run_dir: Path, cache_dir: Path, device: 
 
     if not args.skip_heitz:
         image_dir = Path(data["image_dir"])
-        target_measures = [image_measure_2d(Path(record["image_path"])) for record in data["records"]]
+        heitz_records = sorted(data["records"], key=lambda record: record["filename"])
+        target_measures = [image_measure_2d(Path(record["image_path"])) for record in heitz_records]
         shared_source = exp_dir / "heitz_external" / "WassersteinDictionaryLearning"
         shared_build = exp_dir / "heitz_build"
         for gamma in args.heitz_gammas:
