@@ -212,3 +212,41 @@ Pavia and MNIST experiments.  Potential-method rows intentionally leave
 `mean_w2_squared` blank and report `embedded_recon_mse`, the reconstruction MSE
 in the potential embedding space.  The Gaussian dimension sweep is a timing
 comparison, so it reports embedded reconstruction losses rather than W2.
+
+## Mark 2 Fixed-Duration Timing Suite
+
+`run_timing_suite_mark2.py` runs the fixed-duration scaling suite:
+
+- Pavia 1D: transport-map SAE, EBCM with `eps=0.025`, and Heitz at
+  `gamma=0.5` and `gamma=2.0`
+- MNIST 2D: EBCM with `eps=0.025` and the same two Heitz settings
+- sample-size ablation over `100`, `1000`, and `10000`
+- no plateau stopping; each training trial has a `1000` second cap by default
+- EBCM and transport-map SAE use L1 coefficient `5e-5` by default
+
+Full run:
+
+```bash
+python experiments/timed_comparison/run_timing_suite_mark2.py \
+  --device cuda \
+  --heitz-avx on
+```
+
+Python-side smoke test without building/running Heitz:
+
+```bash
+python experiments/timed_comparison/run_timing_suite_mark2.py \
+  --sample-sizes 10 \
+  --duration-seconds 2 \
+  --epochs 1 \
+  --batch-size 8 \
+  --base-supp-size 32 \
+  --atoms 3 \
+  --top-k 2 \
+  --lista-steps 2 \
+  --device cpu \
+  --skip-heitz
+```
+
+Outputs include `timing_table_mark2.csv`, `timing_table_mark2.html`,
+`loss_history_all.csv`, and one loss-curve PNG per experiment.
