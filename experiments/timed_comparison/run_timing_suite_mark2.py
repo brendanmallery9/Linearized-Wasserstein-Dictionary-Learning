@@ -17,7 +17,6 @@ from run_timing_suite import (
     HEITZ_GAMMAS,
     HSI_LEGACY_SAE,
     as_points,
-    evaluate_heitz_outputs,
     image_measure_1d,
     image_measure_2d,
     label_float,
@@ -33,6 +32,7 @@ from run_timing_suite import (
     set_seeds,
     train_ebcm,
     train_generic_sae,
+    w2_squared,
     write_pavia_pngs,
 )
 
@@ -124,6 +124,8 @@ def trial_row(
     epsilon: float | None = None,
     gamma: float | None = None,
     sinkhorn_iters: int | None = None,
+    eval_status: str = "ok",
+    eval_warning: str | None = None,
 ) -> dict[str, Any]:
     return {
         "experiment": experiment,
@@ -141,9 +143,51 @@ def trial_row(
         "termination_reason": termination_reason,
         "mean_w2_squared": finite(mean_w2_squared),
         "embedded_recon_loss": finite(embedded_recon_loss),
+        "eval_status": eval_status,
+        "eval_warning": eval_warning,
         "history_path": str(history_path) if history_path is not None else None,
         "artifact": str(artifact),
     }
+
+
+def safe_evaluate_heitz_outputs(
+    *,
+    run_dir: Path,
+    target_measures: list[tuple[Any, Any]],
+    kind: str,
+    strict: bool,
+) -> tuple[float | None, str, str | None]:
+    errors = []
+    missing = []
+    for index, (target_points, target_masses) in enumerate(target_measures):
+        fitting_path = run_dir / "outputs" / f"finalFitting_{index:03d}.png"
+        if not fitting_path.exists():
+            missing.append(index)
+            continue
+        if kind == "1d":
+            recon_points, recon_masses = image_measure_1d(fitting_path)
+        elif kind == "2d":
+            recon_points, recon_masses = image_measure_2d(fitting_path)
+        else:
+            raise ValueError(kind)
+        errors.append(w2_squared(target_points, target_masses, recon_points, recon_masses))
+
+    output_count = len(list((run_dir / "outputs").glob("finalFitting_*.png")))
+    if missing:
+        preview = ",".join(str(index) for index in missing[:10])
+        suffix = "" if len(missing) <= 10 else f",...,+{len(missing) - 10} more"
+        warning = (
+            f"Missing {len(missing)}/{len(target_measures)} Heitz reconstruction PNGs "
+            f"(first missing: {preview}{suffix}; output_count={output_count})"
+        )
+        if strict:
+            raise FileNotFoundError(warning)
+        print(f"[warning] {run_dir.name}: {warning}", flush=True)
+        if not errors:
+            return None, "missing_outputs", warning
+        return float(sum(errors) / len(errors)), "partial_outputs", warning
+
+    return float(sum(errors) / len(errors)) if errors else None, "ok", None
 
 
 def run_pavia_size(
@@ -275,7 +319,12 @@ def run_pavia_size(
                 build_dir=shared_build,
                 log_dir=log_dir,
             )
-            w2 = evaluate_heitz_outputs(run_dir=method_dir, target_measures=target_measures, kind="1d")
+            w2, eval_status, eval_warning = safe_evaluate_heitz_outputs(
+                run_dir=method_dir,
+                target_measures=target_measures,
+                kind="1d",
+                strict=args.strict_heitz_eval,
+            )
             rows.append(trial_row(
                 experiment="pavia1d",
                 sample_size=sample_size,
@@ -292,6 +341,8 @@ def run_pavia_size(
                 embedded_recon_loss=None,
                 history_path=method_dir / "history.jsonl",
                 artifact=method_dir,
+                eval_status=eval_status,
+                eval_warning=eval_warning,
             ))
     return rows
 
@@ -370,7 +421,12 @@ def run_mnist_size(
                 build_dir=shared_build,
                 log_dir=log_dir,
             )
-            w2 = evaluate_heitz_outputs(run_dir=method_dir, target_measures=target_measures, kind="2d")
+            w2, eval_status, eval_warning = safe_evaluate_heitz_outputs(
+                run_dir=method_dir,
+                target_measures=target_measures,
+                kind="2d",
+                strict=args.strict_heitz_eval,
+            )
             rows.append(trial_row(
                 experiment="mnist",
                 sample_size=sample_size,
@@ -387,6 +443,8 @@ def run_mnist_size(
                 embedded_recon_loss=None,
                 history_path=method_dir / "history.jsonl",
                 artifact=method_dir,
+                eval_status=eval_status,
+                eval_warning=eval_warning,
             ))
     return rows
 
@@ -480,6 +538,19 @@ def write_loss_plots(rows: list[dict[str, Any]], out_dir: Path) -> dict[str, str
     return outputs
 
 
+def write_current_outputs(rows: list[dict[str, Any]], run_dir: Path) -> tuple[dict[str, str], dict[str, str]]:
+    table_paths = save_table(rows, run_dir, "timing_table_mark2")
+    plot_paths = write_loss_plots(rows, run_dir)
+    write_json(run_dir / "summary.json", {
+        "run_dir": str(run_dir),
+        "num_rows": len(rows),
+        "tables": table_paths,
+        "plots": plot_paths,
+        "partial": True,
+    })
+    return table_paths, plot_paths
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run Mark 2 fixed-duration timing suite.")
     parser.add_argument("--run-dir", type=Path, default=REPO_ROOT / "experiments" / "results" / f"timing_suite_mark2_{timestamp()}")
@@ -493,6 +564,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--force-outputs", action="store_true")
     parser.add_argument("--progress-every", type=int, default=100)
     parser.add_argument("--skip-heitz", action="store_true")
+    parser.add_argument("--strict-heitz-eval", action="store_true",
+                        help="Abort when a Heitz run does not produce every finalFitting PNG")
 
     parser.add_argument("--atoms", type=int, default=10)
     parser.add_argument("--top-k", type=int, default=3)
@@ -552,18 +625,20 @@ def main() -> None:
     if args.experiment in {"all", "pavia1d"}:
         for sample_size in args.sample_sizes:
             rows.extend(run_pavia_size(args, sample_size=sample_size, run_dir=run_dir, cache_dir=cache_dir, device=device))
+            write_current_outputs(rows, run_dir)
     if args.experiment in {"all", "mnist"}:
         for sample_size in args.sample_sizes:
             rows.extend(run_mnist_size(args, sample_size=sample_size, run_dir=run_dir, cache_dir=cache_dir, device=device))
+            write_current_outputs(rows, run_dir)
 
-    table_paths = save_table(rows, run_dir, "timing_table_mark2")
-    plot_paths = write_loss_plots(rows, run_dir)
+    table_paths, plot_paths = write_current_outputs(rows, run_dir)
     write_json(run_dir / "summary.json", {
         "run_dir": str(run_dir),
         "cache_dir": str(cache_dir),
         "num_rows": len(rows),
         "tables": table_paths,
         "plots": plot_paths,
+        "partial": False,
     })
     print(f"\nMark 2 timing suite complete: {run_dir}", flush=True)
     print(f"Table: {table_paths['csv']}", flush=True)

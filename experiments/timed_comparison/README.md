@@ -250,3 +250,9 @@ python experiments/timed_comparison/run_timing_suite_mark2.py \
 
 Outputs include `timing_table_mark2.csv`, `timing_table_mark2.html`,
 `loss_history_all.csv`, and one loss-curve PNG per experiment.
+
+For Heitz runs, the `1000` second cap is checked by the patched C++ optimizer
+between LBFGS iterations, so a long iteration can overshoot the cap before the
+run cancels.  If Heitz cancels before all `finalFitting_*.png` reconstruction
+files are written, Mark 2 records `eval_status=partial_outputs` or
+`missing_outputs` instead of aborting the suite.
