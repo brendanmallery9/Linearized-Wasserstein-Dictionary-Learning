@@ -50,11 +50,11 @@ PRESETS = {
         "heitz_sinkhorn_iters": 1,
     },
     "local": {
-        "atoms": 30,
+        "atoms": 10,
         "top_k": 3,
         "lista_steps": 20,
         "epochs": 500,
-        "batch_size": 128,
+        "batch_size": 256,
         "base_supp_size": 400,
         "pavia_samples": 100,
         "mnist_max_per_digit": 10,

@@ -168,6 +168,9 @@ old timed-comparison scale: `100` Pavia spectra and `10` MNIST images per digit
 (`100` MNIST images total).  The Gaussian dimension sweep still uses `100`
 synthetic measures per dimension because it does not run Heitz.
 
+The same preset also keeps the neural model size close to the prior timing
+comparison: `10` atoms, LISTA depth `20`, and batch size `256`.
+
 The default stopping rule matches the prior Heitz/OT-SAE sweep: neural methods
 run for at most `500` epochs, Heitz runs for at most `500` optimization
 iterations, all methods have a one-hour wall-clock cap, and all methods stop
