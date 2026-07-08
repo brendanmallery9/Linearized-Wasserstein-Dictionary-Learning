@@ -53,7 +53,7 @@ PRESETS = {
         "atoms": 30,
         "top_k": 3,
         "lista_steps": 20,
-        "epochs": 100,
+        "epochs": 500,
         "batch_size": 128,
         "base_supp_size": 400,
         "pavia_samples": 100,
@@ -1599,9 +1599,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--test-fraction", type=float, default=0.1)
     parser.add_argument("--grid-side", type=int, default=64)
     parser.add_argument("--history-every", type=int, default=1)
-    parser.add_argument("--max-elapsed-seconds", type=float, default=None)
-    parser.add_argument("--plateau-window", type=int, default=0)
-    parser.add_argument("--plateau-min-delta", type=float, default=0.0)
+    parser.add_argument("--max-elapsed-seconds", type=float, default=3600.0)
+    parser.add_argument("--plateau-window", type=int, default=10)
+    parser.add_argument("--plateau-min-delta", type=float, default=1e-5)
 
     parser.add_argument("--pavia-cube-path", type=Path, default=REPO_ROOT / "datasets" / "hsi_data" / "pavia" / "data" / "pavia_cube.pt")
     parser.add_argument("--pavia-samples", type=int, default=None)
