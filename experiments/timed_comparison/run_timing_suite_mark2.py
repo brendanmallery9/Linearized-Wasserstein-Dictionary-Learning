@@ -40,6 +40,8 @@ from run_timing_suite import (
 MARK2_EPSILON = 0.025
 DEFAULT_SAMPLE_SIZES = [100, 1000, 10000]
 DEFAULT_DURATION_SECONDS = 1000.0
+DEFAULT_PAVIA_METHODS = ["transport_map", "ebcm", "heitz"]
+DEFAULT_MNIST_METHODS = ["ebcm", "heitz"]
 
 
 def parse_float_list(values: list[str] | None, default: list[float]) -> list[float]:
@@ -208,101 +210,103 @@ def run_pavia_size(
 
     data = prepare_pavia_subset(suite_args, cache_dir)
 
-    maps, embed_seconds, maps_path = prepare_pavia_maps(
-        data,
-        cache_dir,
-        method="hsi_1d",
-        eps=None,
-        force=args.force_cache,
-        progress_every=args.progress_every,
-    )
-    history_path = exp_dir / "transport_map_history.jsonl"
-    t0 = time.monotonic()
-    _, metrics, recon = train_generic_sae(
-        maps.reshape(maps.shape[0], maps.shape[1]),
-        architecture=args.hsi_architecture,
-        hidden_dim=args.atoms,
-        top_k=args.top_k,
-        lista_steps=args.lista_steps,
-        batch_size=args.batch_size,
-        epochs=args.epochs,
-        lr=HSI_LEGACY_SAE["lr"],
-        sparsity_coeff=args.sparsity_coeff,
-        weight_decay=HSI_LEGACY_SAE["weight_decay"],
-        seed=args.seed,
-        device=device,
-        history_path=history_path,
-        run_name=f"mark2_pavia_n{sample_size}_transport",
-        history_time_offset=0.0,
-        max_elapsed_seconds=args.duration_seconds,
-        plateau_window=0,
-        plateau_min_delta=0.0,
-        test_fraction=args.test_fraction,
-        scheduler=HSI_LEGACY_SAE["scheduler"],
-        grad_clip=HSI_LEGACY_SAE["grad_clip"],
-        sparsity_mode=HSI_LEGACY_SAE["sparsity_mode"],
-    )
-    train_seconds = time.monotonic() - t0
-    recon_maps = recon.reshape_as(maps)
-    w2 = pavia_w2_errors(data, recon_maps)
-    rows.append(trial_row(
-        experiment="pavia1d",
-        sample_size=sample_size,
-        method="transport_map",
-        variant=args.hsi_architecture,
-        epsilon=None,
-        embedding_seconds=embed_seconds,
-        train_seconds=train_seconds,
-        epochs_completed=metrics["epochs_completed"],
-        iterations_completed=None,
-        termination_reason=metrics["termination_reason"],
-        mean_w2_squared=w2,
-        embedded_recon_loss=metrics["all_recon_mse"],
-        history_path=history_path,
-        artifact=maps_path,
-    ))
+    if "transport_map" in args.pavia_methods:
+        maps, embed_seconds, maps_path = prepare_pavia_maps(
+            data,
+            cache_dir,
+            method="hsi_1d",
+            eps=None,
+            force=args.force_cache,
+            progress_every=args.progress_every,
+        )
+        history_path = exp_dir / "transport_map_history.jsonl"
+        t0 = time.monotonic()
+        _, metrics, recon = train_generic_sae(
+            maps.reshape(maps.shape[0], maps.shape[1]),
+            architecture=args.hsi_architecture,
+            hidden_dim=args.atoms,
+            top_k=args.top_k,
+            lista_steps=args.lista_steps,
+            batch_size=args.batch_size,
+            epochs=args.epochs,
+            lr=HSI_LEGACY_SAE["lr"],
+            sparsity_coeff=args.sparsity_coeff,
+            weight_decay=HSI_LEGACY_SAE["weight_decay"],
+            seed=args.seed,
+            device=device,
+            history_path=history_path,
+            run_name=f"mark2_pavia_n{sample_size}_transport",
+            history_time_offset=0.0,
+            max_elapsed_seconds=args.duration_seconds,
+            plateau_window=0,
+            plateau_min_delta=0.0,
+            test_fraction=args.test_fraction,
+            scheduler=HSI_LEGACY_SAE["scheduler"],
+            grad_clip=HSI_LEGACY_SAE["grad_clip"],
+            sparsity_mode=HSI_LEGACY_SAE["sparsity_mode"],
+        )
+        train_seconds = time.monotonic() - t0
+        recon_maps = recon.reshape_as(maps)
+        w2 = pavia_w2_errors(data, recon_maps)
+        rows.append(trial_row(
+            experiment="pavia1d",
+            sample_size=sample_size,
+            method="transport_map",
+            variant=args.hsi_architecture,
+            epsilon=None,
+            embedding_seconds=embed_seconds,
+            train_seconds=train_seconds,
+            epochs_completed=metrics["epochs_completed"],
+            iterations_completed=None,
+            termination_reason=metrics["termination_reason"],
+            mean_w2_squared=w2,
+            embedded_recon_loss=metrics["all_recon_mse"],
+            history_path=history_path,
+            artifact=maps_path,
+        ))
 
-    maps, embed_seconds, maps_path = prepare_pavia_maps(
-        data,
-        cache_dir,
-        method="ebcm",
-        eps=MARK2_EPSILON,
-        force=args.force_cache,
-        progress_every=args.progress_every,
-    )
-    history_path = exp_dir / f"ebcm_eps{label_float(MARK2_EPSILON)}_history.jsonl"
-    t0 = time.monotonic()
-    _, metrics, recon = train_ebcm(
-        as_points(data["source_points"]),
-        maps,
-        eps=MARK2_EPSILON,
-        grid_points=as_points(data["target_points"]),
-        args=suite_args,
-        device=device,
-        history_path=history_path,
-        run_name=f"mark2_pavia_n{sample_size}_ebcm_eps{MARK2_EPSILON:g}",
-        history_time_offset=0.0,
-    )
-    train_seconds = time.monotonic() - t0
-    w2 = pavia_w2_errors(data, recon)
-    rows.append(trial_row(
-        experiment="pavia1d",
-        sample_size=sample_size,
-        method="ebcm",
-        variant="entropic_displacement",
-        epsilon=MARK2_EPSILON,
-        embedding_seconds=embed_seconds,
-        train_seconds=train_seconds,
-        epochs_completed=metrics["epochs_completed"],
-        iterations_completed=None,
-        termination_reason=metrics["termination_reason"],
-        mean_w2_squared=w2,
-        embedded_recon_loss=metrics["train_recon_loss"],
-        history_path=history_path,
-        artifact=maps_path,
-    ))
+    if "ebcm" in args.pavia_methods:
+        maps, embed_seconds, maps_path = prepare_pavia_maps(
+            data,
+            cache_dir,
+            method="ebcm",
+            eps=MARK2_EPSILON,
+            force=args.force_cache,
+            progress_every=args.progress_every,
+        )
+        history_path = exp_dir / f"ebcm_eps{label_float(MARK2_EPSILON)}_history.jsonl"
+        t0 = time.monotonic()
+        _, metrics, recon = train_ebcm(
+            as_points(data["source_points"]),
+            maps,
+            eps=MARK2_EPSILON,
+            grid_points=as_points(data["target_points"]),
+            args=suite_args,
+            device=device,
+            history_path=history_path,
+            run_name=f"mark2_pavia_n{sample_size}_ebcm_eps{MARK2_EPSILON:g}",
+            history_time_offset=0.0,
+        )
+        train_seconds = time.monotonic() - t0
+        w2 = pavia_w2_errors(data, recon)
+        rows.append(trial_row(
+            experiment="pavia1d",
+            sample_size=sample_size,
+            method="ebcm",
+            variant="entropic_displacement",
+            epsilon=MARK2_EPSILON,
+            embedding_seconds=embed_seconds,
+            train_seconds=train_seconds,
+            epochs_completed=metrics["epochs_completed"],
+            iterations_completed=None,
+            termination_reason=metrics["termination_reason"],
+            mean_w2_squared=w2,
+            embedded_recon_loss=metrics["train_recon_loss"],
+            history_path=history_path,
+            artifact=maps_path,
+        ))
 
-    if not args.skip_heitz:
+    if "heitz" in args.pavia_methods and not args.skip_heitz:
         image_dir, image_paths = write_pavia_pngs(data, exp_dir / "heitz_input", force=args.force_outputs)
         target_measures = [image_measure_1d(path) for path in sorted(image_paths, key=lambda path: path.name)]
         shared_source = exp_dir / "heitz_external" / "WassersteinDictionaryLearning"
@@ -364,46 +368,47 @@ def run_mnist_size(
     rows: list[dict[str, Any]] = []
 
     data = prepare_mnist_subset(suite_args, cache_dir)
-    maps, embed_seconds, maps_path = prepare_mnist_maps(
-        data,
-        cache_dir,
-        eps=MARK2_EPSILON,
-        force=args.force_cache,
-        progress_every=args.progress_every,
-    )
-    history_path = exp_dir / f"ebcm_eps{label_float(MARK2_EPSILON)}_history.jsonl"
-    t0 = time.monotonic()
-    _, metrics, recon = train_ebcm(
-        as_points(data["source_points"]),
-        maps,
-        eps=MARK2_EPSILON,
-        grid_points=None,
-        args=suite_args,
-        device=device,
-        history_path=history_path,
-        run_name=f"mark2_mnist_n{sample_size}_ebcm_eps{MARK2_EPSILON:g}",
-        history_time_offset=0.0,
-    )
-    train_seconds = time.monotonic() - t0
-    w2 = mnist_w2_errors(data, recon)
-    rows.append(trial_row(
-        experiment="mnist",
-        sample_size=sample_size,
-        method="ebcm",
-        variant="entropic_displacement",
-        epsilon=MARK2_EPSILON,
-        embedding_seconds=embed_seconds,
-        train_seconds=train_seconds,
-        epochs_completed=metrics["epochs_completed"],
-        iterations_completed=None,
-        termination_reason=metrics["termination_reason"],
-        mean_w2_squared=w2,
-        embedded_recon_loss=metrics["train_recon_loss"],
-        history_path=history_path,
-        artifact=maps_path,
-    ))
+    if "ebcm" in args.mnist_methods:
+        maps, embed_seconds, maps_path = prepare_mnist_maps(
+            data,
+            cache_dir,
+            eps=MARK2_EPSILON,
+            force=args.force_cache,
+            progress_every=args.progress_every,
+        )
+        history_path = exp_dir / f"ebcm_eps{label_float(MARK2_EPSILON)}_history.jsonl"
+        t0 = time.monotonic()
+        _, metrics, recon = train_ebcm(
+            as_points(data["source_points"]),
+            maps,
+            eps=MARK2_EPSILON,
+            grid_points=None,
+            args=suite_args,
+            device=device,
+            history_path=history_path,
+            run_name=f"mark2_mnist_n{sample_size}_ebcm_eps{MARK2_EPSILON:g}",
+            history_time_offset=0.0,
+        )
+        train_seconds = time.monotonic() - t0
+        w2 = mnist_w2_errors(data, recon)
+        rows.append(trial_row(
+            experiment="mnist",
+            sample_size=sample_size,
+            method="ebcm",
+            variant="entropic_displacement",
+            epsilon=MARK2_EPSILON,
+            embedding_seconds=embed_seconds,
+            train_seconds=train_seconds,
+            epochs_completed=metrics["epochs_completed"],
+            iterations_completed=None,
+            termination_reason=metrics["termination_reason"],
+            mean_w2_squared=w2,
+            embedded_recon_loss=metrics["train_recon_loss"],
+            history_path=history_path,
+            artifact=maps_path,
+        ))
 
-    if not args.skip_heitz:
+    if "heitz" in args.mnist_methods and not args.skip_heitz:
         image_dir = Path(data["image_dir"])
         heitz_records = sorted(data["records"], key=lambda record: record["filename"])
         target_measures = [image_measure_2d(Path(record["image_path"])) for record in heitz_records]
@@ -551,6 +556,14 @@ def write_current_outputs(rows: list[dict[str, Any]], run_dir: Path) -> tuple[di
     return table_paths, plot_paths
 
 
+def cleanup_results_only(run_dir: Path, cache_dir: Path) -> None:
+    """Keep consolidated metrics/loss outputs and remove bulky intermediates."""
+    for child in ("pavia1d", "mnist"):
+        shutil.rmtree(run_dir / child, ignore_errors=True)
+    if cache_dir == run_dir / "_cache" or run_dir in cache_dir.parents:
+        shutil.rmtree(cache_dir, ignore_errors=True)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run Mark 2 fixed-duration timing suite.")
     parser.add_argument("--run-dir", type=Path, default=REPO_ROOT / "experiments" / "results" / f"timing_suite_mark2_{timestamp()}")
@@ -558,6 +571,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--experiment", choices=["all", "pavia1d", "mnist"], default="all")
     parser.add_argument("--sample-sizes", nargs="*", default=None)
     parser.add_argument("--duration-seconds", type=float, default=DEFAULT_DURATION_SECONDS)
+    parser.add_argument("--requested-timing-run", action="store_true",
+                        help="Use the requested 1000-sample, 2000-second, 100000-iteration Pavia+MNIST settings.")
+    parser.add_argument("--results-only", action="store_true",
+                        help="After writing consolidated tables/loss histories, remove caches and bulky run artifacts.")
     parser.add_argument("--device", choices=["auto", "cuda", "mps", "cpu"], default="auto")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--force-cache", action="store_true")
@@ -584,6 +601,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--hsi-architecture", choices=["JumpReLU_monotone", "TopKAE_monotone"], default="JumpReLU_monotone")
     parser.add_argument("--base-supp-size", type=int, default=400)
 
+    parser.add_argument("--pavia-methods", nargs="*", choices=DEFAULT_PAVIA_METHODS, default=None,
+                        help="Mark 2 Pavia methods to run.")
+    parser.add_argument("--mnist-methods", nargs="*", choices=DEFAULT_MNIST_METHODS, default=None,
+                        help="Mark 2 MNIST methods to run.")
     parser.add_argument("--heitz-gammas", nargs="*", default=None)
     parser.add_argument("--heitz-sinkhorn-iters", type=int, default=5)
     parser.add_argument("--heitz-max-optim-iter", type=int, default=1_000_000)
@@ -594,7 +615,19 @@ def parse_args() -> argparse.Namespace:
     args = parser.parse_args()
 
     args.sample_sizes = parse_int_list(args.sample_sizes, DEFAULT_SAMPLE_SIZES)
+    args.pavia_methods = list(DEFAULT_PAVIA_METHODS if args.pavia_methods is None else args.pavia_methods)
+    args.mnist_methods = list(DEFAULT_MNIST_METHODS if args.mnist_methods is None else args.mnist_methods)
     args.heitz_gammas = parse_float_list(args.heitz_gammas, HEITZ_GAMMAS)
+    if args.requested_timing_run:
+        args.experiment = "all"
+        args.sample_sizes = [1000]
+        args.duration_seconds = 2000.0
+        args.epochs = 100_000
+        args.heitz_max_optim_iter = 100_000
+        args.pavia_methods = ["transport_map", "heitz"]
+        args.mnist_methods = ["ebcm", "heitz"]
+        args.results_only = True
+        args.cache_dir = args.run_dir / "_cache"
     return args
 
 
@@ -612,6 +645,9 @@ def main() -> None:
     manifest = vars(args).copy()
     manifest["device_resolved"] = str(device)
     manifest["epsilon"] = MARK2_EPSILON
+    manifest["pavia_methods"] = args.pavia_methods
+    manifest["mnist_methods"] = args.mnist_methods
+    manifest["results_only"] = args.results_only
     manifest["stopping_rule"] = {
         "type": "fixed_training_duration",
         "duration_seconds": args.duration_seconds,
@@ -640,6 +676,8 @@ def main() -> None:
         "plots": plot_paths,
         "partial": False,
     })
+    if args.results_only:
+        cleanup_results_only(run_dir, cache_dir)
     print(f"\nMark 2 timing suite complete: {run_dir}", flush=True)
     print(f"Table: {table_paths['csv']}", flush=True)
     if "history_csv" in plot_paths:
