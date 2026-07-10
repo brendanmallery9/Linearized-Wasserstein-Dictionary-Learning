@@ -7,10 +7,64 @@ import re
 import shutil
 import subprocess
 import sys
+import time
+from datetime import datetime
 from pathlib import Path
+from typing import Callable, Iterable
 
-from common import REPO_ROOT, stream_command, timestamp, write_json
-from prepare_mnist_png import parse_digits, prepare_mnist_png
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+REPO_ROOT = SCRIPT_DIR.parents[1]
+
+
+def timestamp() -> str:
+    return datetime.now().strftime("%Y%m%d_%H%M%S")
+
+
+def write_json(path: Path, payload: object) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, default=str) + "\n")
+
+
+def stream_command(
+    cmd: Iterable[str],
+    *,
+    cwd: Path | None = None,
+    log_path: Path | None = None,
+    env: dict[str, str] | None = None,
+    on_line: Callable[[str, float], None] | None = None,
+) -> tuple[int, float]:
+    """Run a command, teeing stdout/stderr and returning return code + elapsed time."""
+    cmd = [str(part) for part in cmd]
+    if log_path is not None:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    start = time.monotonic()
+    proc = subprocess.Popen(
+        cmd,
+        cwd=str(cwd) if cwd else None,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+    )
+
+    assert proc.stdout is not None
+    log_file = log_path.open("w") if log_path is not None else None
+    try:
+        for line in proc.stdout:
+            print(line, end="", flush=True)
+            if log_file is not None:
+                log_file.write(line)
+                log_file.flush()
+            if on_line is not None:
+                on_line(line.rstrip("\n"), time.monotonic() - start)
+    finally:
+        if log_file is not None:
+            log_file.close()
+
+    return proc.wait(), time.monotonic() - start
 
 
 DEFAULT_COMMIT = "5cc59a486ec1f122403d324e8882bec810440624"
@@ -512,6 +566,8 @@ def main() -> None:
     input_dir = args.input_dir
     data_metadata = None
     if input_dir is None:
+        from prepare_mnist_png import parse_digits, prepare_mnist_png
+
         data_dir = run_dir / "data" / "mnist_png"
         data_metadata = prepare_mnist_png(
             data_dir,
