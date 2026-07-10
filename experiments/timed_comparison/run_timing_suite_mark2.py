@@ -4,6 +4,7 @@ import argparse
 import json
 import math
 import shutil
+import sys
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -11,6 +12,10 @@ from typing import Any
 
 import pandas as pd
 import torch
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
 
 from common import REPO_ROOT, timestamp, write_json
 from run_timing_suite import (
