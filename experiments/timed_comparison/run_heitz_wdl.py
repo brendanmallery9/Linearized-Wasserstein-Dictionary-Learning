@@ -71,11 +71,12 @@ DEFAULT_COMMIT = "5cc59a486ec1f122403d324e8882bec810440624"
 DEFAULT_CLONE_URL = "https://github.com/matthieuheitz/WassersteinDictionaryLearning.git"
 
 
-LOSS_RE = re.compile(r"loss:\s*([-+0-9.eE]+)\s+step:\s*([-+0-9.eE]+)")
+FLOAT_RE = r"[-+0-9.eE]+|[-+]?nan|[-+]?inf"
+LOSS_RE = re.compile(rf"loss:\s*({FLOAT_RE})\s+step:\s*({FLOAT_RE})")
 ITER_RE = re.compile(r"(?:LBFGS\s+)?Iteration\s+(\d+)(?:,\s+total iterations\s+(\d+))?")
 FINAL_TIME_RE = re.compile(r"time taken \(s\) :\s*([-+0-9.eE]+)")
 EARLY_STOP_RE = re.compile(
-    r"early_stop reason=([A-Za-z0-9_]+) iteration=(\d+) loss=([-+0-9.eE]+) elapsed_seconds=([-+0-9.eE]+)"
+    rf"early_stop reason=([A-Za-z0-9_]+) iteration=(\d+) loss=({FLOAT_RE}) elapsed_seconds=({FLOAT_RE})"
 )
 
 
@@ -407,7 +408,12 @@ def apply_early_stopping_patch(source_dir: Path) -> bool:
             "\t\t\tprintf(\"Iteration %d:\\n\", k);\n"
             "\t\tprintf(\"time elapsed: %f (s)\\n\", elapsedSeconds);\n"
             "\n"
-            "\t\tif(regression->maxElapsedSeconds > 0.0 && elapsedSeconds >= regression->maxElapsedSeconds)\n"
+            "\t\tif(fx != fx)\n"
+            "\t\t{\n"
+            "\t\t\tregression->earlyStopRequested = true;\n"
+            "\t\t\tregression->earlyStopReason = \"nonfinite_loss\";\n"
+            "\t\t}\n"
+            "\t\tif(!regression->earlyStopRequested && regression->maxElapsedSeconds > 0.0 && elapsedSeconds >= regression->maxElapsedSeconds)\n"
             "\t\t{\n"
             "\t\t\tregression->earlyStopRequested = true;\n"
             "\t\t\tregression->earlyStopReason = \"max_elapsed_seconds\";\n"
