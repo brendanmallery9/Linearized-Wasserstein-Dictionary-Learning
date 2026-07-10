@@ -6,6 +6,7 @@ import math
 import shutil
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -17,7 +18,18 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-from common import REPO_ROOT, timestamp, write_json
+REPO_ROOT = SCRIPT_DIR.parents[1]
+
+
+def timestamp() -> str:
+    return datetime.now().strftime("%Y%m%d_%H%M%S")
+
+
+def write_json(path: Path, payload: object) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, default=str) + "\n")
+
+
 from run_timing_suite import (
     HEITZ_GAMMAS,
     HSI_LEGACY_SAE,
