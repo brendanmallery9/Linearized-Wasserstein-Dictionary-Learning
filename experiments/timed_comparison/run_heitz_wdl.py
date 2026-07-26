@@ -346,6 +346,13 @@ def apply_early_stopping_patch(source_dir: Path) -> bool:
         changed = True
 
     inverse_text = inverse_path.read_text()
+    if "if(fx != fx)" in inverse_text:
+        inverse_text = inverse_text.replace(
+            "if(fx != fx)",
+            "if(fx != fx || fx > 1e308 || fx < -1e308)",
+        )
+        inverse_path.write_text(inverse_text)
+        changed = True
     if marker not in inverse_text:
         constructor_needle = (
             "\t\texportOnlyFinalSolution = export_only_final_solution;\n"
@@ -408,7 +415,7 @@ def apply_early_stopping_patch(source_dir: Path) -> bool:
             "\t\t\tprintf(\"Iteration %d:\\n\", k);\n"
             "\t\tprintf(\"time elapsed: %f (s)\\n\", elapsedSeconds);\n"
             "\n"
-            "\t\tif(fx != fx)\n"
+            "\t\tif(fx != fx || fx > 1e308 || fx < -1e308)\n"
             "\t\t{\n"
             "\t\t\tregression->earlyStopRequested = true;\n"
             "\t\t\tregression->earlyStopReason = \"nonfinite_loss\";\n"

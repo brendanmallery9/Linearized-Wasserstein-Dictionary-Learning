@@ -59,6 +59,15 @@ DEFAULT_SAMPLE_SIZES = [100, 1000, 10000]
 DEFAULT_DURATION_SECONDS = 1000.0
 DEFAULT_PAVIA_METHODS = ["transport_map", "ebcm", "heitz"]
 DEFAULT_MNIST_METHODS = ["ebcm", "heitz"]
+WDL_LWDL_TIMING_SAMPLE_SIZES = [1000, 100]
+WDL_LWDL_TIMING_PAVIA_GAMMAS = {
+    1000: [0.5, 2.0],
+    100: [0.5, 2.0, 10.0],
+}
+WDL_LWDL_TIMING_MNIST_GAMMAS = {
+    1000: [0.5, 2.0],
+    100: [0.5, 2.0],
+}
 
 
 def parse_float_list(values: list[str] | None, default: list[float]) -> list[float]:
@@ -125,6 +134,20 @@ def finite(value: Any) -> Any:
     return value
 
 
+def is_numerical_error(reason: str | None) -> bool:
+    return reason in {"nonfinite_loss", "nonfinite_gradient", "nonfinite_parameter"}
+
+
+def heitz_gammas_for_trial(args: argparse.Namespace, *, experiment: str, sample_size: int) -> list[float]:
+    if args.wdl_lwdl_timing_run:
+        if experiment == "pavia1d":
+            return WDL_LWDL_TIMING_PAVIA_GAMMAS[sample_size]
+        if experiment == "mnist":
+            return WDL_LWDL_TIMING_MNIST_GAMMAS[sample_size]
+        raise ValueError(experiment)
+    return list(args.heitz_gammas)
+
+
 def trial_row(
     *,
     experiment: str,
@@ -145,6 +168,8 @@ def trial_row(
     sinkhorn_iters: int | None = None,
     eval_status: str = "ok",
     eval_warning: str | None = None,
+    numerical_error: bool = False,
+    model_state_path: Path | str | None = None,
 ) -> dict[str, Any]:
     return {
         "experiment": experiment,
@@ -164,6 +189,8 @@ def trial_row(
         "embedded_recon_loss": finite(embedded_recon_loss),
         "eval_status": eval_status,
         "eval_warning": eval_warning,
+        "numerical_error": numerical_error,
+        "model_state_path": str(model_state_path) if model_state_path is not None else None,
         "history_path": str(history_path) if history_path is not None else None,
         "artifact": str(artifact),
     }
@@ -237,6 +264,7 @@ def run_pavia_size(
             progress_every=args.progress_every,
         )
         history_path = exp_dir / "transport_map_history.jsonl"
+        checkpoint_path = exp_dir / "transport_map_last_good_on_numerical_error.pt"
         t0 = time.monotonic()
         _, metrics, recon = train_generic_sae(
             maps.reshape(maps.shape[0], maps.shape[1]),
@@ -261,6 +289,7 @@ def run_pavia_size(
             scheduler=HSI_LEGACY_SAE["scheduler"],
             grad_clip=HSI_LEGACY_SAE["grad_clip"],
             sparsity_mode=HSI_LEGACY_SAE["sparsity_mode"],
+            checkpoint_path=checkpoint_path,
         )
         train_seconds = time.monotonic() - t0
         recon_maps = recon.reshape_as(maps)
@@ -274,12 +303,14 @@ def run_pavia_size(
             embedding_seconds=embed_seconds,
             train_seconds=train_seconds,
             epochs_completed=metrics["epochs_completed"],
-            iterations_completed=None,
+            iterations_completed=metrics.get("iterations_completed"),
             termination_reason=metrics["termination_reason"],
             mean_w2_squared=w2,
             embedded_recon_loss=metrics["all_recon_mse"],
             history_path=history_path,
             artifact=maps_path,
+            numerical_error=bool(metrics.get("numerical_error", False)),
+            model_state_path=metrics.get("checkpoint_path"),
         ))
 
     if "ebcm" in args.pavia_methods:
@@ -292,6 +323,7 @@ def run_pavia_size(
             progress_every=args.progress_every,
         )
         history_path = exp_dir / f"ebcm_eps{label_float(MARK2_EPSILON)}_history.jsonl"
+        checkpoint_path = exp_dir / f"ebcm_eps{label_float(MARK2_EPSILON)}_last_good_on_numerical_error.pt"
         t0 = time.monotonic()
         _, metrics, recon = train_ebcm(
             as_points(data["source_points"]),
@@ -303,6 +335,7 @@ def run_pavia_size(
             history_path=history_path,
             run_name=f"mark2_pavia_n{sample_size}_ebcm_eps{MARK2_EPSILON:g}",
             history_time_offset=0.0,
+            checkpoint_path=checkpoint_path,
         )
         train_seconds = time.monotonic() - t0
         w2 = pavia_w2_errors(data, recon)
@@ -315,12 +348,14 @@ def run_pavia_size(
             embedding_seconds=embed_seconds,
             train_seconds=train_seconds,
             epochs_completed=metrics["epochs_completed"],
-            iterations_completed=None,
+            iterations_completed=metrics.get("iterations_completed"),
             termination_reason=metrics["termination_reason"],
             mean_w2_squared=w2,
             embedded_recon_loss=metrics["train_recon_loss"],
             history_path=history_path,
             artifact=maps_path,
+            numerical_error=bool(metrics.get("numerical_error", False)),
+            model_state_path=metrics.get("checkpoint_path"),
         ))
 
     if "heitz" in args.pavia_methods and not args.skip_heitz:
@@ -328,7 +363,7 @@ def run_pavia_size(
         target_measures = [image_measure_1d(path) for path in sorted(image_paths, key=lambda path: path.name)]
         shared_source = exp_dir / "heitz_external" / "WassersteinDictionaryLearning"
         shared_build = exp_dir / "heitz_build"
-        for gamma in args.heitz_gammas:
+        for gamma in heitz_gammas_for_trial(args, experiment="pavia1d", sample_size=sample_size):
             method_dir = exp_dir / f"heitz_gamma{label_float(gamma)}_sink{args.heitz_sinkhorn_iters}"
             summary, wrapper_elapsed = run_heitz_trial(
                 input_dir=image_dir,
@@ -364,6 +399,7 @@ def run_pavia_size(
                 artifact=method_dir,
                 eval_status=eval_status,
                 eval_warning=eval_warning,
+                numerical_error=is_numerical_error(summary.get("termination_reason")),
             ))
     return rows
 
@@ -394,6 +430,7 @@ def run_mnist_size(
             progress_every=args.progress_every,
         )
         history_path = exp_dir / f"ebcm_eps{label_float(MARK2_EPSILON)}_history.jsonl"
+        checkpoint_path = exp_dir / f"ebcm_eps{label_float(MARK2_EPSILON)}_last_good_on_numerical_error.pt"
         t0 = time.monotonic()
         _, metrics, recon = train_ebcm(
             as_points(data["source_points"]),
@@ -405,6 +442,7 @@ def run_mnist_size(
             history_path=history_path,
             run_name=f"mark2_mnist_n{sample_size}_ebcm_eps{MARK2_EPSILON:g}",
             history_time_offset=0.0,
+            checkpoint_path=checkpoint_path,
         )
         train_seconds = time.monotonic() - t0
         w2 = mnist_w2_errors(data, recon)
@@ -417,12 +455,14 @@ def run_mnist_size(
             embedding_seconds=embed_seconds,
             train_seconds=train_seconds,
             epochs_completed=metrics["epochs_completed"],
-            iterations_completed=None,
+            iterations_completed=metrics.get("iterations_completed"),
             termination_reason=metrics["termination_reason"],
             mean_w2_squared=w2,
             embedded_recon_loss=metrics["train_recon_loss"],
             history_path=history_path,
             artifact=maps_path,
+            numerical_error=bool(metrics.get("numerical_error", False)),
+            model_state_path=metrics.get("checkpoint_path"),
         ))
 
     if "heitz" in args.mnist_methods and not args.skip_heitz:
@@ -431,7 +471,7 @@ def run_mnist_size(
         target_measures = [image_measure_2d(Path(record["image_path"])) for record in heitz_records]
         shared_source = exp_dir / "heitz_external" / "WassersteinDictionaryLearning"
         shared_build = exp_dir / "heitz_build"
-        for gamma in args.heitz_gammas:
+        for gamma in heitz_gammas_for_trial(args, experiment="mnist", sample_size=sample_size):
             method_dir = exp_dir / f"heitz_gamma{label_float(gamma)}_sink{args.heitz_sinkhorn_iters}"
             summary, wrapper_elapsed = run_heitz_trial(
                 input_dir=image_dir,
@@ -467,6 +507,7 @@ def run_mnist_size(
                 artifact=method_dir,
                 eval_status=eval_status,
                 eval_warning=eval_warning,
+                numerical_error=is_numerical_error(summary.get("termination_reason")),
             ))
     return rows
 
@@ -590,6 +631,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--duration-seconds", type=float, default=DEFAULT_DURATION_SECONDS)
     parser.add_argument("--requested-timing-run", action="store_true",
                         help="Use the requested 1000-sample, 2000-second, 100000-iteration Pavia+MNIST settings.")
+    parser.add_argument("--wdl-lwdl-timing-run", action="store_true",
+                        help="Run the 2000s WDL/LWDL comparison: n=1000 and n=100, with Pavia gamma=10 only for n=100.")
     parser.add_argument("--results-only", action="store_true",
                         help="After writing consolidated tables/loss histories, remove caches and bulky run artifacts.")
     parser.add_argument("--device", choices=["auto", "cuda", "mps", "cpu"], default="auto")
@@ -645,6 +688,16 @@ def parse_args() -> argparse.Namespace:
         args.mnist_methods = ["ebcm", "heitz"]
         args.results_only = True
         args.cache_dir = args.run_dir / "_cache"
+    if args.wdl_lwdl_timing_run:
+        args.experiment = "all"
+        args.sample_sizes = list(WDL_LWDL_TIMING_SAMPLE_SIZES)
+        args.duration_seconds = 2000.0
+        args.epochs = 1_000_000
+        args.heitz_max_optim_iter = 1_000_000
+        args.pavia_methods = ["transport_map", "heitz"]
+        args.mnist_methods = ["ebcm", "heitz"]
+        args.results_only = False
+        args.cache_dir = args.run_dir / "_cache"
     return args
 
 
@@ -665,6 +718,25 @@ def main() -> None:
     manifest["pavia_methods"] = args.pavia_methods
     manifest["mnist_methods"] = args.mnist_methods
     manifest["results_only"] = args.results_only
+    if args.wdl_lwdl_timing_run:
+        manifest["trial_matrix"] = {
+            "pavia1d": {
+                str(sample_size): {
+                    "lwdl": ["transport_map"],
+                    "heitz_gammas": WDL_LWDL_TIMING_PAVIA_GAMMAS[sample_size],
+                    "sinkhorn_iters": args.heitz_sinkhorn_iters,
+                }
+                for sample_size in args.sample_sizes
+            },
+            "mnist": {
+                str(sample_size): {
+                    "lwdl": [f"ebcm_eps{MARK2_EPSILON:g}"],
+                    "heitz_gammas": WDL_LWDL_TIMING_MNIST_GAMMAS[sample_size],
+                    "sinkhorn_iters": args.heitz_sinkhorn_iters,
+                }
+                for sample_size in args.sample_sizes
+            },
+        }
     manifest["stopping_rule"] = {
         "type": "fixed_training_duration",
         "duration_seconds": args.duration_seconds,

@@ -256,3 +256,19 @@ between LBFGS iterations, so a long iteration can overshoot the cap before the
 run cancels.  If Heitz cancels before all `finalFitting_*.png` reconstruction
 files are written, Mark 2 records `eval_status=partial_outputs` or
 `missing_outputs` instead of aborting the suite.
+
+Requested WDL/LWDL comparison run:
+
+```bash
+python experiments/timed_comparison/run_timing_suite_mark2.py \
+  --wdl-lwdl-timing-run \
+  --device cuda \
+  --heitz-avx on
+```
+
+This mode runs every trial for `2000` seconds with no plateau stopping.  It
+uses sample sizes `1000` and `100`.  For Pavia 1D it runs LWDL transport maps
+plus Heitz `gamma=0.5,2.0` at `n=1000`, and `gamma=0.5,2.0,10.0` at `n=100`.
+For MNIST 2D it runs LWDL/EBCM `eps=0.025` plus Heitz `gamma=0.5,2.0` at both
+sample sizes.  The output table records `mean_w2_squared`, `numerical_error`,
+`termination_reason`, and `iterations_completed`.

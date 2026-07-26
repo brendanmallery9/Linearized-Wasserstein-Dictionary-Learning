@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import random
@@ -154,6 +155,26 @@ def torch_load(path: Path):
 def label_float(value: float) -> str:
     text = f"{value:g}"
     return text.replace("-", "m").replace(".", "p")
+
+
+def label_optional_float(value: float | None) -> str:
+    return "none" if value is None else label_float(value)
+
+
+def stable_hash(value: Any) -> str:
+    payload = json.dumps(value, sort_keys=True, default=str, separators=(",", ":"))
+    return hashlib.sha1(payload.encode("utf-8")).hexdigest()[:12]
+
+
+def dataset_signature(data: dict[str, Any]) -> str:
+    return stable_hash({
+        "parameters": data.get("parameters", {}),
+        "records": data.get("records", []),
+    })
+
+
+def metadata_matches(metadata: dict[str, Any], expected: dict[str, Any]) -> bool:
+    return all(metadata.get(key) == value for key, value in expected.items())
 
 
 def set_seeds(seed: int) -> None:
@@ -442,6 +463,7 @@ def train_generic_sae(
     scheduler: str = "none",
     grad_clip: float | None = None,
     sparsity_mode: str = "sum_per_sample",
+    checkpoint_path: Path | None = None,
 ) -> tuple[torch.nn.Module, dict[str, Any], torch.Tensor]:
     train_loader, test_loader, all_loader = make_loaders(
         data,
@@ -482,11 +504,15 @@ def train_generic_sae(
     termination_reason = "max_epochs"
     epochs_completed = 0
     termination_elapsed = history_time_offset
+    numerical_error = False
+    saved_checkpoint_path = None
+    global_step = 0
 
     for epoch in range(epochs):
         model.train()
         epoch_loss = 0.0
         steps = 0
+        stop_reason = None
         for batch in train_loader:
             batch = batch.to(device).float()
             xhat, z = model(batch)
@@ -498,13 +524,52 @@ def train_generic_sae(
             else:
                 raise ValueError(f"Unknown sparsity_mode: {sparsity_mode}")
             loss = recon + sparsity_coeff * sparsity
+            if not torch.isfinite(loss):
+                stop_reason = "nonfinite_loss"
+                numerical_error = True
+                if checkpoint_path is not None:
+                    checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+                    torch.save({
+                        "model_state": model.state_dict(),
+                        "reason": stop_reason,
+                        "epoch": epoch + 1,
+                        "steps_completed": steps,
+                        "run_name": run_name,
+                    }, checkpoint_path)
+                    saved_checkpoint_path = str(checkpoint_path)
+                break
             opt.zero_grad(set_to_none=True)
             loss.backward()
+            bad_grad = any(
+                param.grad is not None and not torch.isfinite(param.grad).all()
+                for param in model.parameters()
+            )
+            if bad_grad:
+                stop_reason = "nonfinite_gradient"
+                numerical_error = True
+                if checkpoint_path is not None:
+                    checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+                    torch.save({
+                        "model_state": model.state_dict(),
+                        "reason": stop_reason,
+                        "epoch": epoch + 1,
+                        "steps_completed": steps,
+                        "run_name": run_name,
+                    }, checkpoint_path)
+                    saved_checkpoint_path = str(checkpoint_path)
+                break
             if grad_clip is not None and grad_clip > 0:
                 torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
             opt.step()
             epoch_loss += float(loss.item())
             steps += 1
+            global_step += 1
+        if stop_reason is not None:
+            epochs_completed = epoch
+            elapsed = time.monotonic() - start
+            termination_elapsed = history_time_offset + elapsed
+            termination_reason = stop_reason
+            break
 
         if lr_scheduler is not None:
             lr_scheduler.step()
@@ -582,6 +647,7 @@ def train_generic_sae(
     recon = reconstruct_tensor(model, data, device, batch_size)
     metrics = {
         "epochs_completed": epochs_completed,
+        "iterations_completed": global_step,
         "requested_epochs": epochs,
         "termination_reason": termination_reason,
         "termination_elapsed_seconds": termination_elapsed,
@@ -593,6 +659,8 @@ def train_generic_sae(
         "test_total_loss": test_metrics["total_loss"],
         "all_total_loss": all_metrics["total_loss"],
         "mean_active": all_metrics["mean_active"],
+        "numerical_error": numerical_error,
+        "checkpoint_path": saved_checkpoint_path,
     }
     return model, metrics, recon
 
@@ -608,6 +676,7 @@ def train_ebcm(
     history_path: Path | None,
     run_name: str,
     history_time_offset: float,
+    checkpoint_path: Path | None = None,
 ) -> tuple[DisplacementFieldSAE, dict[str, Any], torch.Tensor]:
     source = torch.as_tensor(source_points, dtype=torch.float32)
     maps = maps.float()
@@ -647,6 +716,7 @@ def train_ebcm(
         "max_elapsed_seconds": args.max_elapsed_seconds,
         "plateau_window": args.plateau_window,
         "plateau_min_delta": args.plateau_min_delta,
+        "checkpoint_path": str(checkpoint_path) if checkpoint_path is not None else None,
     }
     metrics = train_one_model(model, train_loader, test_loader, config, device)
     recon = reconstruct_tensor(model, maps, device, args.batch_size)
@@ -789,18 +859,21 @@ def prepare_pavia_maps(
     progress_every: int,
 ) -> tuple[torch.Tensor, float, Path]:
     eps_label = "exact" if eps is None else label_float(eps)
-    out_dir = cache_dir / "pavia1d" / "embeddings" / f"{method}_eps{eps_label}"
+    signature = dataset_signature(data)
+    out_dir = cache_dir / "pavia1d" / "embeddings" / f"{method}_data{signature}_eps{eps_label}"
     maps_path = out_dir / "maps.pt"
     meta_path = out_dir / "metadata.json"
     params = {
         "method": method,
         "eps": eps,
         "num_samples": len(data["records"]),
-        "source_shape": tuple(data["source_points"].shape),
+        "source_shape": list(data["source_points"].shape),
+        "dataset_signature": signature,
     }
     if maps_path.exists() and meta_path.exists() and not force:
         metadata = json.loads(meta_path.read_text())
-        return torch_load(maps_path).float(), float(metadata.get("elapsed_seconds", 0.0)), maps_path
+        if metadata_matches(metadata, params):
+            return torch_load(maps_path).float(), float(metadata.get("elapsed_seconds", 0.0)), maps_path
 
     out_dir.mkdir(parents=True, exist_ok=True)
     start = time.monotonic()
@@ -846,12 +919,21 @@ def prepare_potentials(
     progress_every: int,
     method: str = "emd",
     eps_reg: float | None = None,
+    dataset_signature_value: str | None = None,
 ) -> tuple[torch.Tensor, float, Path]:
     potentials_path = out_dir / "potentials.pt"
     meta_path = out_dir / "metadata.json"
+    params = {
+        "method": method,
+        "eps_reg": eps_reg,
+        "num_samples": len(targets),
+        "source_shape": list(as_points(source_points).shape),
+        "dataset_signature": dataset_signature_value,
+    }
     if potentials_path.exists() and meta_path.exists() and not force:
         metadata = json.loads(meta_path.read_text())
-        return torch_load(potentials_path).float(), float(metadata.get("elapsed_seconds", 0.0)), potentials_path
+        if metadata_matches(metadata, params):
+            return torch_load(potentials_path).float(), float(metadata.get("elapsed_seconds", 0.0)), potentials_path
     out_dir.mkdir(parents=True, exist_ok=True)
     start = time.monotonic()
     source = as_points(source_points)
@@ -871,13 +953,7 @@ def prepare_potentials(
     tensor = torch.stack(potentials, dim=0).float()
     elapsed = time.monotonic() - start
     torch.save(tensor, potentials_path)
-    write_json(meta_path, {
-        "method": method,
-        "eps_reg": eps_reg,
-        "num_samples": len(targets),
-        "source_shape": tuple(source.shape),
-        "elapsed_seconds": elapsed,
-    })
+    write_json(meta_path, {**params, "elapsed_seconds": elapsed})
     return tensor, elapsed, potentials_path
 
 
@@ -969,6 +1045,11 @@ def run_heitz_trial(
         log_path=log_dir / f"{run_dir.name}.log",
     )
     if returncode != 0:
+        summary_path = run_dir / "summary.json"
+        if summary_path.exists():
+            summary = json.loads(summary_path.read_text())
+            if summary.get("termination_reason") == "nonfinite_loss":
+                return summary, elapsed
         raise RuntimeError(f"Heitz trial failed: {run_dir}")
     summary = json.loads((run_dir / "summary.json").read_text())
     return summary, elapsed
@@ -980,6 +1061,12 @@ def evaluate_heitz_outputs(
     target_measures: list[tuple[np.ndarray, np.ndarray]],
     kind: str,
 ) -> float:
+    output_paths = sorted((run_dir / "outputs").glob("finalFitting_*.png"))
+    if len(output_paths) != len(target_measures):
+        raise ValueError(
+            f"Heitz output count mismatch for {run_dir}: "
+            f"expected {len(target_measures)}, found {len(output_paths)}"
+        )
     rows = []
     for index, (target_points, target_masses) in enumerate(target_measures):
         fitting_path = run_dir / "outputs" / f"finalFitting_{index:03d}.png"
@@ -1083,15 +1170,25 @@ def prepare_mnist_maps(
     force: bool,
     progress_every: int,
 ) -> tuple[torch.Tensor, float, Path]:
+    signature = dataset_signature(data)
     out_dir = cache_dir / "mnist" / "embeddings" / (
         f"digits{'-'.join(map(str, sorted({r['digit'] for r in data['records']})))}"
-        f"_n{len(data['records'])}_support{data['source_points'].shape[0]}_eps{label_float(eps)}"
+        f"_n{len(data['records'])}_support{data['source_points'].shape[0]}"
+        f"_data{signature}_eps{label_float(eps)}"
     )
     maps_path = out_dir / "maps.pt"
     meta_path = out_dir / "metadata.json"
+    params = {
+        "method": "entropic_barycentric_maps",
+        "eps": eps,
+        "num_samples": len(data["records"]),
+        "source_shape": list(data["source_points"].shape),
+        "dataset_signature": signature,
+    }
     if maps_path.exists() and meta_path.exists() and not force:
         metadata = json.loads(meta_path.read_text())
-        return torch_load(maps_path).float(), float(metadata.get("elapsed_seconds", 0.0)), maps_path
+        if metadata_matches(metadata, params):
+            return torch_load(maps_path).float(), float(metadata.get("elapsed_seconds", 0.0)), maps_path
 
     out_dir.mkdir(parents=True, exist_ok=True)
     start = time.monotonic()
@@ -1113,13 +1210,7 @@ def prepare_mnist_maps(
     tensor = torch.stack(maps, dim=0)
     elapsed = time.monotonic() - start
     torch.save(tensor, maps_path)
-    write_json(meta_path, {
-        "method": "entropic_barycentric_maps",
-        "eps": eps,
-        "num_samples": len(data["records"]),
-        "source_shape": tuple(data["source_points"].shape),
-        "elapsed_seconds": elapsed,
-    })
+    write_json(meta_path, {**params, "elapsed_seconds": elapsed})
     return tensor, elapsed, maps_path
 
 
@@ -1193,14 +1284,24 @@ def prepare_gaussian_maps(
     force: bool,
     progress_every: int,
 ) -> tuple[torch.Tensor, float, Path]:
+    signature = dataset_signature(data)
     out_dir = cache_dir / "gaussian" / "embeddings" / (
-        f"dim{dim}_n{len(data['records'])}_support{data['source_points'].shape[0]}_eps{label_float(eps)}"
+        f"dim{dim}_n{len(data['records'])}_support{data['source_points'].shape[0]}"
+        f"_data{signature}_eps{label_float(eps)}"
     )
     maps_path = out_dir / "maps.pt"
     meta_path = out_dir / "metadata.json"
+    params = {
+        "method": "entropic_barycentric_maps",
+        "dim": dim,
+        "eps": eps,
+        "num_samples": len(data["records"]),
+        "dataset_signature": signature,
+    }
     if maps_path.exists() and meta_path.exists() and not force:
         metadata = json.loads(meta_path.read_text())
-        return torch_load(maps_path).float(), float(metadata.get("elapsed_seconds", 0.0)), maps_path
+        if metadata_matches(metadata, params):
+            return torch_load(maps_path).float(), float(metadata.get("elapsed_seconds", 0.0)), maps_path
 
     out_dir.mkdir(parents=True, exist_ok=True)
     source = as_points(data["source_points"])
@@ -1216,17 +1317,15 @@ def prepare_gaussian_maps(
     tensor = torch.stack(maps, dim=0)
     elapsed = time.monotonic() - start
     torch.save(tensor, maps_path)
-    write_json(meta_path, {
-        "method": "entropic_barycentric_maps",
-        "dim": dim,
-        "eps": eps,
-        "elapsed_seconds": elapsed,
-        "num_samples": len(data["records"]),
-    })
+    write_json(meta_path, {**params, "elapsed_seconds": elapsed})
     return tensor, elapsed, maps_path
 
 
 def pavia_w2_errors(data: dict[str, Any], recon_maps: torch.Tensor) -> float:
+    if len(recon_maps) != len(data["records"]):
+        raise ValueError(
+            f"Pavia reconstruction count mismatch: expected {len(data['records'])}, got {len(recon_maps)}"
+        )
     errors = []
     for index, recon in enumerate(recon_maps):
         target_points, target_masses = pavia_target_arrays(data, index)
@@ -1235,6 +1334,10 @@ def pavia_w2_errors(data: dict[str, Any], recon_maps: torch.Tensor) -> float:
 
 
 def mnist_w2_errors(data: dict[str, Any], recon_maps: torch.Tensor) -> float:
+    if len(recon_maps) != len(data["records"]):
+        raise ValueError(
+            f"MNIST reconstruction count mismatch: expected {len(data['records'])}, got {len(recon_maps)}"
+        )
     errors = []
     for (target_points, target_masses), recon in zip(mnist_targets(data), recon_maps):
         errors.append(w2_squared(target_points, target_masses, as_points(recon)))
@@ -1358,17 +1461,21 @@ def run_pavia1d(args: argparse.Namespace, run_dir: Path, cache_dir: Path, device
         })
 
     targets = [pavia_target_arrays(data, i) for i in range(len(data["records"]))]
+    pavia_signature = dataset_signature(data)
     potentials, potential_embed_seconds, potentials_path = prepare_potentials(
         data["source_points"],
         targets,
         cache_dir / "pavia1d" / "embeddings" / (
-            f"potentials_n{len(data['records'])}_support{data['source_points'].shape[0]}"
+            f"potentials_data{pavia_signature}_n{len(data['records'])}"
+            f"_support{data['source_points'].shape[0]}"
+            f"_{args.potential_ot_method}_eps{label_optional_float(args.potential_eps_reg)}"
         ),
         force=args.force_cache,
         progress_label="pavia",
         progress_every=args.progress_every,
         method=args.potential_ot_method,
         eps_reg=args.potential_eps_reg,
+        dataset_signature_value=pavia_signature,
     )
     history_path = exp_dir / "potential_history.jsonl"
     t0 = time.monotonic()
@@ -1416,7 +1523,7 @@ def run_pavia1d(args: argparse.Namespace, run_dir: Path, cache_dir: Path, device
 
     if not args.skip_heitz:
         image_dir, image_paths = write_pavia_pngs(data, exp_dir / "heitz_input", force=args.force_outputs)
-        target_measures = [image_measure_1d(path) for path in image_paths]
+        target_measures = [image_measure_1d(path) for path in sorted(image_paths, key=lambda path: path.name)]
         shared_source = exp_dir / "heitz_external" / "WassersteinDictionaryLearning"
         shared_build = exp_dir / "heitz_build"
         for gamma in args.heitz_gammas:
@@ -1510,17 +1617,21 @@ def run_mnist(args: argparse.Namespace, run_dir: Path, cache_dir: Path, device: 
         })
 
     targets = mnist_targets(data)
+    mnist_signature = dataset_signature(data)
     potentials, potential_embed_seconds, potentials_path = prepare_potentials(
         data["source_points"],
         targets,
         cache_dir / "mnist" / "embeddings" / (
-            f"potentials_n{len(data['records'])}_support{data['source_points'].shape[0]}"
+            f"potentials_data{mnist_signature}_n{len(data['records'])}"
+            f"_support{data['source_points'].shape[0]}"
+            f"_{args.potential_ot_method}_eps{label_optional_float(args.potential_eps_reg)}"
         ),
         force=args.force_cache,
         progress_label="mnist",
         progress_every=args.progress_every,
         method=args.potential_ot_method,
         eps_reg=args.potential_eps_reg,
+        dataset_signature_value=mnist_signature,
     )
     history_path = exp_dir / "potential_history.jsonl"
     t0 = time.monotonic()
@@ -1663,17 +1774,21 @@ def run_gaussian(args: argparse.Namespace, run_dir: Path, cache_dir: Path, devic
             })
 
         targets = [(as_points(target), None) for target in data["target_points"]]
+        gaussian_signature = dataset_signature(data)
         potentials, embed_seconds, potentials_path = prepare_potentials(
             data["source_points"],
             targets,
             cache_dir / "gaussian" / "embeddings" / (
-                f"potentials_dim{dim}_n{len(data['records'])}_support{data['source_points'].shape[0]}"
+                f"potentials_dim{dim}_data{gaussian_signature}_n{len(data['records'])}"
+                f"_support{data['source_points'].shape[0]}"
+                f"_{args.potential_ot_method}_eps{label_optional_float(args.potential_eps_reg)}"
             ),
             force=args.force_cache,
             progress_label=f"gaussian d={dim}",
             progress_every=args.progress_every,
             method=args.potential_ot_method,
             eps_reg=args.potential_eps_reg,
+            dataset_signature_value=gaussian_signature,
         )
         history_path = exp_dir / f"dim{dim}_potential_history.jsonl"
         t0 = time.monotonic()
@@ -1741,7 +1856,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--epochs", type=int, default=None)
     parser.add_argument("--batch-size", type=int, default=None)
     parser.add_argument("--lr", type=float, default=1e-3)
-    parser.add_argument("--sparsity-coeff", type=float, default=1e-4)
+    parser.add_argument("--sparsity-coeff", type=float, default=HSI_LEGACY_SAE["sparsity_coeff"])
     parser.add_argument("--weight-decay", type=float, default=0.1)
     parser.add_argument("--test-fraction", type=float, default=0.1)
     parser.add_argument("--grid-side", type=int, default=64)

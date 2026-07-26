@@ -311,6 +311,25 @@ def train_one_model(model, train_loader, test_loader, config, device):
     termination_reason = "max_epochs"
     termination_elapsed_seconds = history_time_offset
     epochs_completed = 0
+    numerical_error = False
+    checkpoint_path = config.get("checkpoint_path")
+    saved_checkpoint_path = None
+
+    def save_numerical_checkpoint(reason, epoch_index, steps_completed):
+        nonlocal saved_checkpoint_path
+        if not checkpoint_path:
+            return
+        path = Path(checkpoint_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        torch.save({
+            "model_state": model.state_dict(),
+            "reason": reason,
+            "epoch": epoch_index,
+            "global_step": steps_completed,
+            "run_name": config.get("name", ""),
+        }, path)
+        saved_checkpoint_path = str(path)
+
     for epoch in range(config["epochs"]):
         # Epsilon annealing
         if anneal and eps_start is not None and eps_end is not None:
@@ -330,6 +349,7 @@ def train_one_model(model, train_loader, test_loader, config, device):
 
         epoch_loss = 0.0
         epoch_steps = 0
+        stop_reason = None
 
         for T_batch in train_loader:
             T_batch = T_batch.to(device).float()
@@ -345,19 +365,58 @@ def train_one_model(model, train_loader, test_loader, config, device):
             sparsity = c_eff * lam.abs().sum(dim=1).mean()
 
             loss = recon + sparsity
+            if not torch.isfinite(loss):
+                stop_reason = "nonfinite_loss"
+                numerical_error = True
+                save_numerical_checkpoint(stop_reason, epoch + 1, global_step)
+                break
 
             opt.zero_grad()
             loss.backward()
+            bad_grad = any(
+                param.grad is not None and not torch.isfinite(param.grad).all()
+                for param in model.parameters()
+            )
+            if bad_grad:
+                stop_reason = "nonfinite_gradient"
+                numerical_error = True
+                save_numerical_checkpoint(stop_reason, epoch + 1, global_step)
+                break
             opt.step()
 
             epoch_loss += loss.item()
             epoch_steps += 1
             global_step += 1
 
+        if stop_reason is not None:
+            epochs_completed = epoch
+            train_elapsed = time.monotonic() - train_start
+            termination_elapsed_seconds = history_time_offset + train_elapsed
+            termination_reason = stop_reason
+            print(
+                f"Stopping before epoch {epoch + 1}: {termination_reason} "
+                f"(elapsed={termination_elapsed_seconds:.1f}s)",
+                flush=True,
+            )
+            if history_path:
+                with open(history_path, "a") as f:
+                    f.write(json.dumps({
+                        "event": "termination",
+                        "run_name": config.get("name", ""),
+                        "reason": termination_reason,
+                        "epoch": epochs_completed,
+                        "epochs": config["epochs"],
+                        "global_step": global_step,
+                        "elapsed_seconds": termination_elapsed_seconds,
+                        "train_loss": epoch_losses[-1] if epoch_losses else None,
+                        "checkpoint_path": saved_checkpoint_path,
+                    }) + "\n")
+            break
+
         if scheduler is not None:
             scheduler.step()
 
-        avg_loss = epoch_loss / epoch_steps
+        avg_loss = epoch_loss / max(epoch_steps, 1)
         epoch_losses.append(avg_loss)
         train_elapsed = time.monotonic() - train_start
         total_elapsed = history_time_offset + train_elapsed
@@ -419,6 +478,7 @@ def train_one_model(model, train_loader, test_loader, config, device):
                         "reason": termination_reason,
                         "epoch": epochs_completed,
                         "epochs": config["epochs"],
+                        "global_step": global_step,
                         "elapsed_seconds": termination_elapsed_seconds,
                         "train_loss": avg_loss,
                     }) + "\n")
@@ -432,6 +492,7 @@ def train_one_model(model, train_loader, test_loader, config, device):
                     "reason": termination_reason,
                     "epoch": epochs_completed,
                     "epochs": config["epochs"],
+                    "global_step": global_step,
                     "elapsed_seconds": termination_elapsed_seconds,
                     "train_loss": epoch_losses[-1] if epoch_losses else None,
                 }) + "\n")
@@ -450,10 +511,13 @@ def train_one_model(model, train_loader, test_loader, config, device):
         "test_mean_l1": test_metrics["mean_l1"],
         "test_mean_active": test_metrics["mean_active"],
         "epochs_completed": epochs_completed,
+        "iterations_completed": global_step,
         "requested_epochs": config["epochs"],
         "termination_reason": termination_reason,
         "termination_elapsed_seconds": termination_elapsed_seconds,
         "final_train_loss": epoch_losses[-1] if epoch_losses else None,
+        "numerical_error": numerical_error,
+        "checkpoint_path": saved_checkpoint_path,
     }
 
 
