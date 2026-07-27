@@ -1029,6 +1029,7 @@ def run_heitz_trial(
         "--gamma", gamma,
         "--scale-dict-factor", args.heitz_scale_dict_factor,
         "--avx", args.heitz_avx,
+        "--lbfgs-epsilon", args.heitz_lbfgs_epsilon,
         "--max-elapsed-seconds", args.max_elapsed_seconds if args.max_elapsed_seconds is not None else 0,
         "--plateau-window", args.plateau_window,
         "--plateau-min-delta", args.plateau_min_delta,
@@ -1039,6 +1040,8 @@ def run_heitz_trial(
         del cmd[idx:idx + 2]
     if args.heitz_with_openmp:
         cmd.append("--with-openmp")
+    if getattr(args, "heitz_warm_restart", False):
+        cmd.append("--warm-restart")
     returncode, elapsed = stream_command(
         cmd,
         cwd=REPO_ROOT,
@@ -1890,8 +1893,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--heitz-max-optim-iter", type=int, default=None)
     parser.add_argument("--heitz-loss-type", type=int, default=2)
     parser.add_argument("--heitz-scale-dict-factor", type=float, default=100.0)
+    parser.add_argument("--heitz-lbfgs-epsilon", type=float, default=1e-50)
     parser.add_argument("--heitz-avx", choices=["auto", "on", "off"], default="auto")
     parser.add_argument("--heitz-with-openmp", action="store_true")
+    parser.add_argument("--heitz-warm-restart", action="store_true")
     args = parser.parse_args()
 
     args.atoms = choose(args, "atoms")

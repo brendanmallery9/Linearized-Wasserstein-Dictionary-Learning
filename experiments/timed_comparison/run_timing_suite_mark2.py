@@ -121,9 +121,11 @@ def mark2_args(args: argparse.Namespace, *, pavia_samples: int | None = None, mn
         hsi_architecture=args.hsi_architecture,
         heitz_loss_type=args.heitz_loss_type,
         heitz_scale_dict_factor=args.heitz_scale_dict_factor,
+        heitz_lbfgs_epsilon=args.heitz_lbfgs_epsilon,
         heitz_max_optim_iter=args.heitz_max_optim_iter,
         heitz_avx=args.heitz_avx,
         heitz_with_openmp=args.heitz_with_openmp,
+        heitz_warm_restart=args.heitz_warm_restart,
         heitz_sinkhorn_iters=args.heitz_sinkhorn_iters,
     )
 
@@ -632,7 +634,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--requested-timing-run", action="store_true",
                         help="Use the requested 1000-sample, 2000-second, 100000-iteration Pavia+MNIST settings.")
     parser.add_argument("--wdl-lwdl-timing-run", action="store_true",
-                        help="Run the 2000s WDL/LWDL comparison: n=1000 and n=100, with Pavia gamma=10 only for n=100.")
+                        help="Run the 1000s WDL/LWDL comparison: n=1000 and n=100, with Pavia gamma=10 only for n=100.")
     parser.add_argument("--results-only", action="store_true",
                         help="After writing consolidated tables/loss histories, remove caches and bulky run artifacts.")
     parser.add_argument("--device", choices=["auto", "cuda", "mps", "cpu"], default="auto")
@@ -670,8 +672,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--heitz-max-optim-iter", type=int, default=1_000_000)
     parser.add_argument("--heitz-loss-type", type=int, default=2)
     parser.add_argument("--heitz-scale-dict-factor", type=float, default=100.0)
+    parser.add_argument("--heitz-lbfgs-epsilon", type=float, default=1e-50)
     parser.add_argument("--heitz-avx", choices=["auto", "on", "off"], default="auto")
     parser.add_argument("--heitz-with-openmp", action="store_true")
+    parser.add_argument("--heitz-warm-restart", action="store_true")
     args = parser.parse_args()
 
     args.sample_sizes = parse_int_list(args.sample_sizes, DEFAULT_SAMPLE_SIZES)
@@ -691,9 +695,11 @@ def parse_args() -> argparse.Namespace:
     if args.wdl_lwdl_timing_run:
         args.experiment = "all"
         args.sample_sizes = list(WDL_LWDL_TIMING_SAMPLE_SIZES)
-        args.duration_seconds = 2000.0
+        args.duration_seconds = 1000.0
         args.epochs = 1_000_000
         args.heitz_max_optim_iter = 1_000_000
+        args.heitz_lbfgs_epsilon = 1e-50
+        args.heitz_warm_restart = True
         args.pavia_methods = ["transport_map", "heitz"]
         args.mnist_methods = ["ebcm", "heitz"]
         args.results_only = False
@@ -725,6 +731,8 @@ def main() -> None:
                     "lwdl": ["transport_map"],
                     "heitz_gammas": WDL_LWDL_TIMING_PAVIA_GAMMAS[sample_size],
                     "sinkhorn_iters": args.heitz_sinkhorn_iters,
+                    "lbfgs_epsilon": args.heitz_lbfgs_epsilon,
+                    "warm_restart": args.heitz_warm_restart,
                 }
                 for sample_size in args.sample_sizes
             },
@@ -733,6 +741,8 @@ def main() -> None:
                     "lwdl": [f"ebcm_eps{MARK2_EPSILON:g}"],
                     "heitz_gammas": WDL_LWDL_TIMING_MNIST_GAMMAS[sample_size],
                     "sinkhorn_iters": args.heitz_sinkhorn_iters,
+                    "lbfgs_epsilon": args.heitz_lbfgs_epsilon,
+                    "warm_restart": args.heitz_warm_restart,
                 }
                 for sample_size in args.sample_sizes
             },

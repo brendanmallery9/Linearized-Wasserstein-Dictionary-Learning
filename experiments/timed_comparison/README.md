@@ -266,8 +266,13 @@ python experiments/timed_comparison/run_timing_suite_mark2.py \
   --heitz-avx on
 ```
 
-This mode runs every trial for `2000` seconds with no plateau stopping.  It
-uses sample sizes `1000` and `100`.  For Pavia 1D it runs LWDL transport maps
+This mode gives every trial a `1000` second wall-clock budget with no plateau
+stopping.  LWDL trains until the shared time cap.  Heitz runs its native
+`warmRestart` mode, which repeats short LBFGS chunks until the same time cap or
+a numerical failure, instead of ending the trial after one converged LBFGS call.
+The run records Heitz LBFGS convergence tolerance explicitly; Heitz's native
+strict tolerance is `1e-50` for this run.  It uses sample sizes `1000` and
+`100`.  For Pavia 1D it runs LWDL transport maps
 plus Heitz `gamma=0.5,2.0` at `n=1000`, and `gamma=0.5,2.0,10.0` at `n=100`.
 For MNIST 2D it runs LWDL/EBCM `eps=0.025` plus Heitz `gamma=0.5,2.0` at both
 sample sizes.  The output table records `mean_w2_squared`, `numerical_error`,

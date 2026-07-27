@@ -282,6 +282,7 @@ def apply_early_stopping_patch(source_dir: Path) -> bool:
             '\t\t\t\t\t\t"[--maxElapsedSeconds <seconds>] "\n'
             '\t\t\t\t\t\t"[--plateauWindow <n>] "\n'
             '\t\t\t\t\t\t"[--plateauMinDelta <delta>] "\n'
+            '\t\t\t\t\t\t"[--lbfgsEpsilon <epsilon>] "\n'
             '\t\t\t\t\t\t"[--deterministic] "\n'
         )
         if usage_needle not in main_text:
@@ -300,6 +301,7 @@ def apply_early_stopping_patch(source_dir: Path) -> bool:
             "\tdouble maxElapsedSeconds = 0.0;\n"
             "\tint plateauWindow = 0;\n"
             "\tdouble plateauMinDelta = 0.0;\n"
+            "\tdouble lbfgsEpsilon = 1e-50;\n"
             "\tbool warmRestart = false;\n"
         )
         if defaults_needle not in main_text:
@@ -320,6 +322,8 @@ def apply_early_stopping_patch(source_dir: Path) -> bool:
             '\t\t\tplateauWindow = std::stoi(argv[i + 1]);\n'
             '\t\t} else if (std::string(argv[i]) == "--plateauMinDelta") {\n'
             '\t\t\tplateauMinDelta = std::stof(argv[i + 1]);\n'
+            '\t\t} else if (std::string(argv[i]) == "--lbfgsEpsilon") {\n'
+            '\t\t\tlbfgsEpsilon = std::stof(argv[i + 1]);\n'
             '\t\t} else if (std::string(argv[i]) == "--deterministic") {\n'
         )
         if parse_needle not in main_text:
@@ -338,18 +342,65 @@ def apply_early_stopping_patch(source_dir: Path) -> bool:
             "\tregression.maxElapsedSeconds = maxElapsedSeconds;\n"
             "\tregression.plateauWindow = plateauWindow;\n"
             "\tregression.plateauMinDelta = plateauMinDelta;\n"
+            "\tregression.lbfgsEpsilon = lbfgsEpsilon;\n"
         )
         if config_needle not in main_text:
             raise RuntimeError(f"Could not find regression config insertion point in {main_path}")
         main_text = main_text.replace(config_needle, config_replacement)
         main_path.write_text(main_text)
         changed = True
+    else:
+        main_changed = False
+        if "--lbfgsEpsilon <epsilon>" not in main_text:
+            main_text = main_text.replace(
+                '\t\t\t\t\t\t"[--plateauMinDelta <delta>] "\n',
+                '\t\t\t\t\t\t"[--plateauMinDelta <delta>] "\n'
+                '\t\t\t\t\t\t"[--lbfgsEpsilon <epsilon>] "\n',
+            )
+            main_changed = True
+        if "double lbfgsEpsilon" not in main_text:
+            main_text = main_text.replace(
+                "\tdouble plateauMinDelta = 0.0;\n",
+                "\tdouble plateauMinDelta = 0.0;\n"
+                "\tdouble lbfgsEpsilon = 1e-50;\n",
+            )
+            main_changed = True
+        if "lbfgsEpsilon = std::stof" not in main_text:
+            main_text = main_text.replace(
+                '\t\t} else if (std::string(argv[i]) == "--plateauMinDelta") {\n'
+                '\t\t\tplateauMinDelta = std::stof(argv[i + 1]);\n'
+                '\t\t} else if (std::string(argv[i]) == "--deterministic") {\n',
+                '\t\t} else if (std::string(argv[i]) == "--plateauMinDelta") {\n'
+                '\t\t\tplateauMinDelta = std::stof(argv[i + 1]);\n'
+                '\t\t} else if (std::string(argv[i]) == "--lbfgsEpsilon") {\n'
+                '\t\t\tlbfgsEpsilon = std::stof(argv[i + 1]);\n'
+                '\t\t} else if (std::string(argv[i]) == "--deterministic") {\n',
+            )
+            main_changed = True
+        if "regression.lbfgsEpsilon" not in main_text:
+            main_text = main_text.replace(
+                "\tregression.plateauMinDelta = plateauMinDelta;\n",
+                "\tregression.plateauMinDelta = plateauMinDelta;\n"
+                "\tregression.lbfgsEpsilon = lbfgsEpsilon;\n",
+            )
+            main_changed = True
+        if main_changed:
+            main_path.write_text(main_text)
+            changed = True
 
     inverse_text = inverse_path.read_text()
     if "if(fx != fx)" in inverse_text:
         inverse_text = inverse_text.replace(
             "if(fx != fx)",
             "if(fx != fx || fx > 1e308 || fx < -1e308)",
+        )
+        inverse_path.write_text(inverse_text)
+        changed = True
+    if "lbfgs_param.epsilon = 1E-50;" in inverse_text and "lbfgs_param.epsilon = lbfgsEpsilon;" not in inverse_text:
+        inverse_text = inverse_text.replace(
+            "\t\tlbfgs_param.epsilon = 1E-50;\t\t// Convergence test on accuracy\n",
+            "\t\tlbfgs_param.epsilon = 1E-50;\t\t// Convergence test on accuracy\n"
+            "\t\tlbfgs_param.epsilon = lbfgsEpsilon;\n",
         )
         inverse_path.write_text(inverse_text)
         changed = True
@@ -368,6 +419,7 @@ def apply_early_stopping_patch(source_dir: Path) -> bool:
             "\t\tmaxElapsedSeconds = 0.0;\n"
             "\t\tplateauWindow = 0;\n"
             "\t\tplateauMinDelta = 0.0;\n"
+            "\t\tlbfgsEpsilon = 1e-50;\n"
             "\t\tearlyStopRequested = false;\n"
             "\t\tearlyStopReason = \"\";\n"
             "\t\tbestPlateauAverage = 0.0;\n"
@@ -406,6 +458,12 @@ def apply_early_stopping_patch(source_dir: Path) -> bool:
             "\t\telse\n"
             "\t\t\tprintf(\"Iteration %d:\\n\", k);\n"
             "\t\tprintf(\"time elapsed: %f (s)\\n\", regression->chrono.GetDiffMs()*0.001);\n"
+        )
+        quiet_progress_needle = (
+            "\t\tif(regression->warmRestart)\n"
+            "\t\t\tprintf(\"LBFGS Iteration %d, total iterations %d, loss: %f, elapsed_seconds: %f\\n\", k,regression->iteration, fx, regression->chrono.GetDiffMs()*0.001);\n"
+            "\t\telse\n"
+            "\t\t\tprintf(\"Iteration %d, loss: %f, elapsed_seconds: %f\\n\", k, fx, regression->chrono.GetDiffMs()*0.001);\n"
         )
         progress_replacement = (
             "\t\tdouble elapsedSeconds = regression->chrono.GetDiffMs()*0.001;\n"
@@ -458,9 +516,12 @@ def apply_early_stopping_patch(source_dir: Path) -> bool:
             "\t\t\treturn LBFGSERR_CANCELED;\n"
             "\t\t}\n"
         )
-        if progress_needle not in inverse_text:
+        if progress_needle in inverse_text:
+            inverse_text = inverse_text.replace(progress_needle, progress_replacement)
+        elif quiet_progress_needle in inverse_text:
+            inverse_text = inverse_text.replace(quiet_progress_needle, progress_replacement)
+        else:
             raise RuntimeError(f"Could not find progress insertion point in {inverse_path}")
-        inverse_text = inverse_text.replace(progress_needle, progress_replacement)
 
         fields_needle = (
             "\t// For warm restart\n"
@@ -476,6 +537,7 @@ def apply_early_stopping_patch(source_dir: Path) -> bool:
             "\tdouble maxElapsedSeconds;\n"
             "\tint plateauWindow;\n"
             "\tdouble plateauMinDelta;\n"
+            "\tdouble lbfgsEpsilon;\n"
             "\tbool earlyStopRequested;\n"
             "\tstd::string earlyStopReason;\n"
             "\tstd::vector<double> plateauLosses;\n"
@@ -488,6 +550,32 @@ def apply_early_stopping_patch(source_dir: Path) -> bool:
         inverse_text = inverse_text.replace(fields_needle, fields_replacement)
         inverse_path.write_text(inverse_text)
         changed = True
+    else:
+        inverse_changed = False
+        if "lbfgsEpsilon = 1e-50" not in inverse_text:
+            inverse_text = inverse_text.replace(
+                "\t\tplateauMinDelta = 0.0;\n",
+                "\t\tplateauMinDelta = 0.0;\n"
+                "\t\tlbfgsEpsilon = 1e-50;\n",
+            )
+            inverse_changed = True
+        if "lbfgs_param.epsilon = lbfgsEpsilon;" not in inverse_text:
+            inverse_text = inverse_text.replace(
+                "\t\tlbfgs_param.epsilon = 1E-50;\t\t// Convergence test on accuracy\n",
+                "\t\tlbfgs_param.epsilon = 1E-50;\t\t// Convergence test on accuracy\n"
+                "\t\tlbfgs_param.epsilon = lbfgsEpsilon;\n",
+            )
+            inverse_changed = True
+        if "\tdouble lbfgsEpsilon;\n" not in inverse_text:
+            inverse_text = inverse_text.replace(
+                "\tdouble plateauMinDelta;\n",
+                "\tdouble plateauMinDelta;\n"
+                "\tdouble lbfgsEpsilon;\n",
+            )
+            inverse_changed = True
+        if inverse_changed:
+            inverse_path.write_text(inverse_text)
+            changed = True
 
     return changed
 
@@ -561,6 +649,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-elapsed-seconds", type=float, default=None)
     parser.add_argument("--plateau-window", type=int, default=0)
     parser.add_argument("--plateau-min-delta", type=float, default=0.0)
+    parser.add_argument("--lbfgs-epsilon", type=float, default=1e-50)
     parser.add_argument("--export-every", type=int, default=0)
     parser.add_argument("--warm-restart", action="store_true")
     parser.add_argument("--deterministic", action="store_true", default=True)
@@ -690,6 +779,7 @@ def main() -> None:
     if args.plateau_window:
         cmd.extend(["--plateauWindow", args.plateau_window])
         cmd.extend(["--plateauMinDelta", args.plateau_min_delta])
+    cmd.extend(["--lbfgsEpsilon", args.lbfgs_epsilon])
 
     returncode, elapsed = stream_command(cmd, cwd=build_dir, log_path=log_path, on_line=on_line)
     if termination_reason is None:
@@ -734,6 +824,7 @@ def main() -> None:
             "max_elapsed_seconds": args.max_elapsed_seconds,
             "plateau_window": args.plateau_window,
             "plateau_min_delta": args.plateau_min_delta,
+            "lbfgs_epsilon": args.lbfgs_epsilon,
             "export_every": args.export_every,
             "warm_restart": args.warm_restart,
             "deterministic": args.deterministic,
