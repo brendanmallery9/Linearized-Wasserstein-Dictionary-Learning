@@ -323,7 +323,7 @@ def apply_early_stopping_patch(source_dir: Path) -> bool:
             '\t\t} else if (std::string(argv[i]) == "--plateauMinDelta") {\n'
             '\t\t\tplateauMinDelta = std::stof(argv[i + 1]);\n'
             '\t\t} else if (std::string(argv[i]) == "--lbfgsEpsilon") {\n'
-            '\t\t\tlbfgsEpsilon = std::stof(argv[i + 1]);\n'
+            '\t\t\tlbfgsEpsilon = std::stod(argv[i + 1]);\n'
             '\t\t} else if (std::string(argv[i]) == "--deterministic") {\n'
         )
         if parse_needle not in main_text:
@@ -365,7 +365,13 @@ def apply_early_stopping_patch(source_dir: Path) -> bool:
                 "\tdouble lbfgsEpsilon = 1e-50;\n",
             )
             main_changed = True
-        if "lbfgsEpsilon = std::stof" not in main_text:
+        if "lbfgsEpsilon = std::stof" in main_text:
+            main_text = main_text.replace(
+                "lbfgsEpsilon = std::stof(argv[i + 1]);",
+                "lbfgsEpsilon = std::stod(argv[i + 1]);",
+            )
+            main_changed = True
+        if "lbfgsEpsilon = std::stod" not in main_text:
             main_text = main_text.replace(
                 '\t\t} else if (std::string(argv[i]) == "--plateauMinDelta") {\n'
                 '\t\t\tplateauMinDelta = std::stof(argv[i + 1]);\n'
@@ -373,7 +379,7 @@ def apply_early_stopping_patch(source_dir: Path) -> bool:
                 '\t\t} else if (std::string(argv[i]) == "--plateauMinDelta") {\n'
                 '\t\t\tplateauMinDelta = std::stof(argv[i + 1]);\n'
                 '\t\t} else if (std::string(argv[i]) == "--lbfgsEpsilon") {\n'
-                '\t\t\tlbfgsEpsilon = std::stof(argv[i + 1]);\n'
+                '\t\t\tlbfgsEpsilon = std::stod(argv[i + 1]);\n'
                 '\t\t} else if (std::string(argv[i]) == "--deterministic") {\n',
             )
             main_changed = True
