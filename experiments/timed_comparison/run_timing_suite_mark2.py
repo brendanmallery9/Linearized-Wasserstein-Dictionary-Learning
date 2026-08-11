@@ -172,6 +172,12 @@ def trial_row(
     eval_warning: str | None = None,
     numerical_error: bool = False,
     model_state_path: Path | str | None = None,
+    segment_forward_seconds: float | None = None,
+    segment_dictionary_grad_seconds: float | None = None,
+    segment_weights_grad_seconds: float | None = None,
+    segment_total_seconds: float | None = None,
+    segment_other_seconds: float | None = None,
+    segment_calls: int | None = None,
 ) -> dict[str, Any]:
     return {
         "experiment": experiment,
@@ -192,6 +198,12 @@ def trial_row(
         "eval_status": eval_status,
         "eval_warning": eval_warning,
         "numerical_error": numerical_error,
+        "segment_forward_seconds": finite(segment_forward_seconds),
+        "segment_dictionary_grad_seconds": finite(segment_dictionary_grad_seconds),
+        "segment_weights_grad_seconds": finite(segment_weights_grad_seconds),
+        "segment_total_seconds": finite(segment_total_seconds),
+        "segment_other_seconds": finite(segment_other_seconds),
+        "segment_calls": segment_calls,
         "model_state_path": str(model_state_path) if model_state_path is not None else None,
         "history_path": str(history_path) if history_path is not None else None,
         "artifact": str(artifact),
@@ -377,6 +389,7 @@ def run_pavia_size(
                 build_dir=shared_build,
                 log_dir=log_dir,
             )
+            segment_timing = summary.get("segment_timing") or {}
             w2, eval_status, eval_warning = safe_evaluate_heitz_outputs(
                 run_dir=method_dir,
                 target_measures=target_measures,
@@ -402,6 +415,12 @@ def run_pavia_size(
                 eval_status=eval_status,
                 eval_warning=eval_warning,
                 numerical_error=is_numerical_error(summary.get("termination_reason")),
+                segment_forward_seconds=segment_timing.get("forward_seconds"),
+                segment_dictionary_grad_seconds=segment_timing.get("dictionary_grad_seconds"),
+                segment_weights_grad_seconds=segment_timing.get("weights_grad_seconds"),
+                segment_total_seconds=segment_timing.get("total_segment_seconds"),
+                segment_other_seconds=segment_timing.get("other_segment_seconds"),
+                segment_calls=segment_timing.get("calls"),
             ))
     return rows
 
@@ -485,6 +504,7 @@ def run_mnist_size(
                 build_dir=shared_build,
                 log_dir=log_dir,
             )
+            segment_timing = summary.get("segment_timing") or {}
             w2, eval_status, eval_warning = safe_evaluate_heitz_outputs(
                 run_dir=method_dir,
                 target_measures=target_measures,
@@ -510,6 +530,12 @@ def run_mnist_size(
                 eval_status=eval_status,
                 eval_warning=eval_warning,
                 numerical_error=is_numerical_error(summary.get("termination_reason")),
+                segment_forward_seconds=segment_timing.get("forward_seconds"),
+                segment_dictionary_grad_seconds=segment_timing.get("dictionary_grad_seconds"),
+                segment_weights_grad_seconds=segment_timing.get("weights_grad_seconds"),
+                segment_total_seconds=segment_timing.get("total_segment_seconds"),
+                segment_other_seconds=segment_timing.get("other_segment_seconds"),
+                segment_calls=segment_timing.get("calls"),
             ))
     return rows
 

@@ -1541,6 +1541,7 @@ def run_pavia1d(args: argparse.Namespace, run_dir: Path, cache_dir: Path, device
                 build_dir=shared_build,
                 log_dir=log_dir,
             )
+            segment_timing = summary.get("segment_timing") or {}
             w2 = evaluate_heitz_outputs(run_dir=method_dir, target_measures=target_measures, kind="1d")
             rows.append({
                 "experiment": "pavia1d",
@@ -1559,6 +1560,12 @@ def run_pavia1d(args: argparse.Namespace, run_dir: Path, cache_dir: Path, device
                 "embedded_recon_mse": None,
                 "primary_error": w2,
                 "primary_error_name": "mean_w2_squared",
+                "segment_forward_seconds": segment_timing.get("forward_seconds"),
+                "segment_dictionary_grad_seconds": segment_timing.get("dictionary_grad_seconds"),
+                "segment_weights_grad_seconds": segment_timing.get("weights_grad_seconds"),
+                "segment_total_seconds": segment_timing.get("total_segment_seconds"),
+                "segment_other_seconds": segment_timing.get("other_segment_seconds"),
+                "segment_calls": segment_timing.get("calls"),
                 "artifact": str(method_dir),
             })
 
@@ -1698,6 +1705,7 @@ def run_mnist(args: argparse.Namespace, run_dir: Path, cache_dir: Path, device: 
                 build_dir=shared_build,
                 log_dir=log_dir,
             )
+            segment_timing = summary.get("segment_timing") or {}
             w2 = evaluate_heitz_outputs(run_dir=method_dir, target_measures=target_measures, kind="2d")
             rows.append({
                 "experiment": "mnist",
@@ -1716,6 +1724,12 @@ def run_mnist(args: argparse.Namespace, run_dir: Path, cache_dir: Path, device: 
                 "embedded_recon_mse": None,
                 "primary_error": w2,
                 "primary_error_name": "mean_w2_squared",
+                "segment_forward_seconds": segment_timing.get("forward_seconds"),
+                "segment_dictionary_grad_seconds": segment_timing.get("dictionary_grad_seconds"),
+                "segment_weights_grad_seconds": segment_timing.get("weights_grad_seconds"),
+                "segment_total_seconds": segment_timing.get("total_segment_seconds"),
+                "segment_other_seconds": segment_timing.get("other_segment_seconds"),
+                "segment_calls": segment_timing.get("calls"),
                 "artifact": str(method_dir),
             })
 

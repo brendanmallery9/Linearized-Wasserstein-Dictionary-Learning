@@ -277,3 +277,12 @@ plus Heitz `gamma=0.5,2.0` at `n=1000`, and `gamma=0.5,2.0,10.0` at `n=100`.
 For MNIST 2D it runs LWDL/EBCM `eps=0.025` plus Heitz `gamma=0.5,2.0` at both
 sample sizes.  The output table records `mean_w2_squared`, `numerical_error`,
 `termination_reason`, and `iterations_completed`.
+
+Heitz/WDL rows also report `segment_forward_seconds`,
+`segment_dictionary_grad_seconds`, `segment_weights_grad_seconds`,
+`segment_total_seconds`, `segment_other_seconds`, and `segment_calls`. These
+are cumulative timers injected into the C++ `SinkhornGrads` implementation:
+the forward Sinkhorn/barycenter loop, the dictionary-gradient backward loop,
+and the weights-gradient backward loop. The `other` bucket is the remaining
+trial time, including line-search overhead, normalization, export, logging, and
+wrapper/runtime overhead.

@@ -78,6 +78,12 @@ FINAL_TIME_RE = re.compile(r"time taken \(s\) :\s*([-+0-9.eE]+)")
 EARLY_STOP_RE = re.compile(
     rf"early_stop reason=([A-Za-z0-9_]+) iteration=(\d+) loss=({FLOAT_RE}) elapsed_seconds=({FLOAT_RE})"
 )
+SEGMENT_TIMING_RE = re.compile(
+    rf"segment_timing iteration=(\d+) calls=(\d+) "
+    rf"forward_seconds=({FLOAT_RE}) "
+    rf"dictionary_grad_seconds=({FLOAT_RE}) "
+    rf"weights_grad_seconds=({FLOAT_RE})"
+)
 
 
 def run_checked(cmd: list[str], *, cwd: Path | None = None) -> None:
@@ -262,6 +268,272 @@ def apply_linux_cxx_link_patch(source_dir: Path) -> bool:
         raise RuntimeError(f"Could not find app link target in {cmake_path}")
     cmake_path.write_text(text.replace(needle, replacement))
     return True
+
+
+def apply_segment_timing_patch(source_dir: Path) -> bool:
+    """Add cumulative timers for the three Algorithm-1 Heitz gradient segments."""
+    inverse_path = source_dir / "cpp" / "inverseWasserstein.h"
+    text = inverse_path.read_text()
+    marker = "Codex segment timing patch"
+    if marker in text:
+        return False
+
+    changed = False
+    include_needle = "#include <complex>\n"
+    include_replacement = (
+        "#include <complex>\n"
+        "#include <chrono>\n"
+    )
+    if include_needle not in text:
+        raise RuntimeError(f"Could not find chrono include insertion point in {inverse_path}")
+    text = text.replace(include_needle, include_replacement, 1)
+    changed = True
+
+    constructor_needle = (
+        "\t\titeration = 0;\n"
+        "\t\tbary_computation = new WassersteinBarycenter<KernelType>(p, n_bregman_iterations);\n"
+    )
+    constructor_replacement = (
+        "\t\titeration = 0;\n"
+        "\t\t// Codex segment timing patch: cumulative Algorithm-1 phase timers.\n"
+        "\t\tsegmentForwardSeconds = 0.0;\n"
+        "\t\tsegmentDictionaryGradSeconds = 0.0;\n"
+        "\t\tsegmentWeightsGradSeconds = 0.0;\n"
+        "\t\tsegmentCalls = 0;\n"
+        "\t\tbary_computation = new WassersteinBarycenter<KernelType>(p, n_bregman_iterations);\n"
+    )
+    if constructor_needle not in text:
+        raise RuntimeError(f"Could not find constructor timing insertion point in {inverse_path}")
+    text = text.replace(constructor_needle, constructor_replacement, 1)
+
+    fields_needle = (
+        "\tint iteration;\n"
+        "\tint exportEveryMIter;\n"
+    )
+    fields_replacement = (
+        "\tint iteration;\n"
+        "\t// Codex segment timing patch\n"
+        "\tdouble segmentForwardSeconds;\n"
+        "\tdouble segmentDictionaryGradSeconds;\n"
+        "\tdouble segmentWeightsGradSeconds;\n"
+        "\tint segmentCalls;\n"
+        "\tint exportEveryMIter;\n"
+    )
+    if fields_needle not in text:
+        raise RuntimeError(f"Could not find segment timing field insertion point in {inverse_path}")
+    text = text.replace(fields_needle, fields_replacement, 1)
+
+    progress_needle = (
+        "\t\tif(regression->warmRestart)\n"
+        "\t\t\tprintf(\"LBFGS Iteration %d, total iterations %d, loss: %f, elapsed_seconds: %f\\n\", k,regression->iteration, fx, regression->chrono.GetDiffMs()*0.001);\n"
+        "\t\telse\n"
+        "\t\t\tprintf(\"Iteration %d, loss: %f, elapsed_seconds: %f\\n\", k, fx, regression->chrono.GetDiffMs()*0.001);\n"
+    )
+    progress_replacement = (
+        "\t\tif(regression->warmRestart)\n"
+        "\t\t\tprintf(\"LBFGS Iteration %d, total iterations %d, loss: %f, elapsed_seconds: %f\\n\", k,regression->iteration, fx, regression->chrono.GetDiffMs()*0.001);\n"
+        "\t\telse\n"
+        "\t\t\tprintf(\"Iteration %d, loss: %f, elapsed_seconds: %f\\n\", k, fx, regression->chrono.GetDiffMs()*0.001);\n"
+        "\t\tprintf(\"segment_timing iteration=%d calls=%d forward_seconds=%.9f dictionary_grad_seconds=%.9f weights_grad_seconds=%.9f\\n\",\n"
+        "\t\t\tregression->iteration,\n"
+        "\t\t\tregression->segmentCalls,\n"
+        "\t\t\tregression->segmentForwardSeconds,\n"
+        "\t\t\tregression->segmentDictionaryGradSeconds,\n"
+        "\t\t\tregression->segmentWeightsGradSeconds);\n"
+    )
+    if progress_needle in text:
+        text = text.replace(progress_needle, progress_replacement, 1)
+    else:
+        early_progress_needle = (
+            "\t\tdouble elapsedSeconds = regression->chrono.GetDiffMs()*0.001;\n"
+            "\t\tif(regression->warmRestart)\n"
+            "\t\t\tprintf(\"LBFGS Iteration %d, total iterations %d :\\n\", k,regression->iteration);\n"
+            "\t\telse\n"
+            "\t\t\tprintf(\"Iteration %d:\\n\", k);\n"
+            "\t\tprintf(\"time elapsed: %f (s)\\n\", elapsedSeconds);\n"
+        )
+        early_progress_replacement = (
+            "\t\tdouble elapsedSeconds = regression->chrono.GetDiffMs()*0.001;\n"
+            "\t\tif(regression->warmRestart)\n"
+            "\t\t\tprintf(\"LBFGS Iteration %d, total iterations %d :\\n\", k,regression->iteration);\n"
+            "\t\telse\n"
+            "\t\t\tprintf(\"Iteration %d:\\n\", k);\n"
+            "\t\tprintf(\"time elapsed: %f (s)\\n\", elapsedSeconds);\n"
+            "\t\tprintf(\"segment_timing iteration=%d calls=%d forward_seconds=%.9f dictionary_grad_seconds=%.9f weights_grad_seconds=%.9f\\n\",\n"
+            "\t\t\tregression->iteration,\n"
+            "\t\t\tregression->segmentCalls,\n"
+            "\t\t\tregression->segmentForwardSeconds,\n"
+            "\t\t\tregression->segmentDictionaryGradSeconds,\n"
+            "\t\t\tregression->segmentWeightsGradSeconds);\n"
+        )
+        if early_progress_needle not in text:
+            raise RuntimeError(f"Could not find segment timing progress insertion point in {inverse_path}")
+        text = text.replace(early_progress_needle, early_progress_replacement, 1)
+
+    forward_needle = (
+        "\t\tproblem->normalize_values();\n"
+        "\n"
+        "\t\t// Bregman Projections\n"
+        "\t\tfor (int iter=1; iter<=n_iter_gradients; iter++) {\n"
+    )
+    forward_replacement = (
+        "\t\tproblem->normalize_values();\n"
+        "\n"
+        "\t\tauto codexSegmentStart = std::chrono::steady_clock::now();\n"
+        "\t\t// Bregman Projections\n"
+        "\t\tfor (int iter=1; iter<=n_iter_gradients; iter++) {\n"
+    )
+    if forward_needle not in text:
+        raise RuntimeError(f"Could not find dense forward timing insertion point in {inverse_path}")
+    text = text.replace(forward_needle, forward_replacement, 1)
+
+    dict_needle = (
+        "\t\tstd::vector<double, aligned_allocator<double> > n(N), v(K*N,0.0), tmp(K*N), c(K*N), sumv(N);\n"
+        "\t\tloss.gradient(&barycenter[0], &problem->observed_pdf[id*N], N, &g[0]);\n"
+        "\n"
+        "\t\t// gradient w.r.t dictionary\n"
+    )
+    dict_replacement = (
+        "\t\tsegmentForwardSeconds += std::chrono::duration<double>(std::chrono::steady_clock::now() - codexSegmentStart).count();\n"
+        "\n"
+        "\t\tstd::vector<double, aligned_allocator<double> > n(N), v(K*N,0.0), tmp(K*N), c(K*N), sumv(N);\n"
+        "\t\tloss.gradient(&barycenter[0], &problem->observed_pdf[id*N], N, &g[0]);\n"
+        "\n"
+        "\t\tcodexSegmentStart = std::chrono::steady_clock::now();\n"
+        "\t\t// gradient w.r.t dictionary\n"
+    )
+    if dict_needle not in text:
+        raise RuntimeError(f"Could not find dense dictionary timing insertion point in {inverse_path}")
+    text = text.replace(dict_needle, dict_replacement, 1)
+
+    weights_needle = (
+        "\n"
+        "\n"
+        "\t\t///  gradient w.r.t weights\n"
+        "\n"
+        "\n"
+        "\t\tfor (int i=0; i<N; i++) {\n"
+    )
+    weights_replacement = (
+        "\n"
+        "\n"
+        "\t\tsegmentDictionaryGradSeconds += std::chrono::duration<double>(std::chrono::steady_clock::now() - codexSegmentStart).count();\n"
+        "\t\tcodexSegmentStart = std::chrono::steady_clock::now();\n"
+        "\t\t///  gradient w.r.t weights\n"
+        "\n"
+        "\n"
+        "\t\tfor (int i=0; i<N; i++) {\n"
+    )
+    if weights_needle not in text:
+        raise RuntimeError(f"Could not find dense weights timing insertion point in {inverse_path}")
+    text = text.replace(weights_needle, weights_replacement, 1)
+
+    dense_end_needle = (
+        "\t\t\t}\n"
+        "\t\t}\n"
+        "\t}\n"
+        "\n"
+        "\n"
+        "\n"
+        "void compute_gradient_both_log_signArray"
+    )
+    dense_end_replacement = (
+        "\t\t\t}\n"
+        "\t\t}\n"
+        "\t\tsegmentWeightsGradSeconds += std::chrono::duration<double>(std::chrono::steady_clock::now() - codexSegmentStart).count();\n"
+        "\t\tsegmentCalls++;\n"
+        "\t}\n"
+        "\n"
+        "\n"
+        "\n"
+        "void compute_gradient_both_log_signArray"
+    )
+    if dense_end_needle not in text:
+        raise RuntimeError(f"Could not find dense timing end insertion point in {inverse_path}")
+    text = text.replace(dense_end_needle, dense_end_replacement, 1)
+
+    log_forward_needle = (
+        "\tproblem->normalize_values();\n"
+        "\n"
+        "\t// Forward log, Backward log + sign array\n"
+        "\n"
+        "\tfor (int iter=1; iter<=n_iter_gradients; iter++) {\n"
+    )
+    log_forward_replacement = (
+        "\tproblem->normalize_values();\n"
+        "\n"
+        "\tauto codexSegmentStart = std::chrono::steady_clock::now();\n"
+        "\t// Forward log, Backward log + sign array\n"
+        "\n"
+        "\tfor (int iter=1; iter<=n_iter_gradients; iter++) {\n"
+    )
+    if log_forward_needle not in text:
+        raise RuntimeError(f"Could not find log forward timing insertion point in {inverse_path}")
+    text = text.replace(log_forward_needle, log_forward_replacement, 1)
+
+    log_dict_needle = (
+        "\tstd::vector<double, aligned_allocator<double> > n(N), v(K*N,0.0), tmp(K*N), c(K*N), sumv(N);\n"
+        "\n"
+        "\tloss.gradient(&barycenter[0], &problem->observed_pdf[id*N], N, &g[0]);\n"
+        "\n"
+        "\t// gradient w.r.t dictionary\n"
+    )
+    log_dict_replacement = (
+        "\tsegmentForwardSeconds += std::chrono::duration<double>(std::chrono::steady_clock::now() - codexSegmentStart).count();\n"
+        "\n"
+        "\tstd::vector<double, aligned_allocator<double> > n(N), v(K*N,0.0), tmp(K*N), c(K*N), sumv(N);\n"
+        "\n"
+        "\tloss.gradient(&barycenter[0], &problem->observed_pdf[id*N], N, &g[0]);\n"
+        "\n"
+        "\tcodexSegmentStart = std::chrono::steady_clock::now();\n"
+        "\t// gradient w.r.t dictionary\n"
+    )
+    if log_dict_needle not in text:
+        raise RuntimeError(f"Could not find log dictionary timing insertion point in {inverse_path}")
+    text = text.replace(log_dict_needle, log_dict_replacement, 1)
+
+    log_weights_needle = (
+        "\n"
+        "\n"
+        "\t//  gradient w.r.t weights\n"
+        "\n"
+        "\tfor (int i=0; i<N; i++) {\n"
+    )
+    log_weights_replacement = (
+        "\n"
+        "\n"
+        "\tsegmentDictionaryGradSeconds += std::chrono::duration<double>(std::chrono::steady_clock::now() - codexSegmentStart).count();\n"
+        "\tcodexSegmentStart = std::chrono::steady_clock::now();\n"
+        "\t//  gradient w.r.t weights\n"
+        "\n"
+        "\tfor (int i=0; i<N; i++) {\n"
+    )
+    if log_weights_needle not in text:
+        raise RuntimeError(f"Could not find log weights timing insertion point in {inverse_path}")
+    text = text.replace(log_weights_needle, log_weights_replacement, 1)
+
+    log_end_needle = (
+        "\t}\n"
+        "\tdelete[] signArray;\n"
+        "}\n"
+        "\n"
+        "// This function doesn't support warmRestart\n"
+    )
+    log_end_replacement = (
+        "\t}\n"
+        "\tsegmentWeightsGradSeconds += std::chrono::duration<double>(std::chrono::steady_clock::now() - codexSegmentStart).count();\n"
+        "\tsegmentCalls++;\n"
+        "\tdelete[] signArray;\n"
+        "}\n"
+        "\n"
+        "// This function doesn't support warmRestart\n"
+    )
+    if log_end_needle not in text:
+        raise RuntimeError(f"Could not find log timing end insertion point in {inverse_path}")
+    text = text.replace(log_end_needle, log_end_replacement, 1)
+
+    inverse_path.write_text(text)
+    return changed
 
 
 def apply_early_stopping_patch(source_dir: Path) -> bool:
@@ -689,6 +961,7 @@ def main() -> None:
     source_commit = clone_or_reuse_source(source_dir, args.clone_url, args.commit)
     apply_early_stopping_patch(source_dir)
     apply_quiet_logging_patch(source_dir)
+    apply_segment_timing_patch(source_dir)
     apply_linux_cxx_link_patch(source_dir)
     avx_mode = default_avx_mode() if args.avx == "auto" else args.avx
     binary = build_binary(source_dir, build_dir, avx_mode=avx_mode, with_openmp=args.with_openmp)
@@ -710,6 +983,12 @@ def main() -> None:
     termination_iteration = None
     termination_loss = None
     termination_elapsed_seconds = None
+    segment_totals = {
+        "calls": 0,
+        "forward_seconds": None,
+        "dictionary_grad_seconds": None,
+        "weights_grad_seconds": None,
+    }
 
     def on_line(line: str, elapsed: float) -> None:
         nonlocal eval_index, iter_index, final_reported_time
@@ -737,6 +1016,32 @@ def main() -> None:
                 "elapsed_seconds": elapsed,
                 "lbfgs_iteration": int(iter_match.group(1)),
                 "total_iteration": int(iter_match.group(2) or iter_match.group(1)),
+            }
+            with history_path.open("a") as f:
+                f.write(json.dumps(event) + "\n")
+        segment_match = SEGMENT_TIMING_RE.search(line)
+        if segment_match:
+            segment_totals.update({
+                "calls": int(segment_match.group(2)),
+                "forward_seconds": float(segment_match.group(3)),
+                "dictionary_grad_seconds": float(segment_match.group(4)),
+                "weights_grad_seconds": float(segment_match.group(5)),
+            })
+            segment_sum = (
+                segment_totals["forward_seconds"]
+                + segment_totals["dictionary_grad_seconds"]
+                + segment_totals["weights_grad_seconds"]
+            )
+            event = {
+                "event": "segment_timing",
+                "method": "heitz_wdl",
+                "iteration": int(segment_match.group(1)),
+                "calls": segment_totals["calls"],
+                "elapsed_seconds": elapsed,
+                "forward_seconds": segment_totals["forward_seconds"],
+                "dictionary_grad_seconds": segment_totals["dictionary_grad_seconds"],
+                "weights_grad_seconds": segment_totals["weights_grad_seconds"],
+                "total_segment_seconds": segment_sum,
             }
             with history_path.open("a") as f:
                 f.write(json.dumps(event) + "\n")
@@ -797,6 +1102,15 @@ def main() -> None:
         termination_iteration = iter_index
     if termination_elapsed_seconds is None:
         termination_elapsed_seconds = elapsed
+    total_segment_seconds = None
+    other_segment_seconds = None
+    if segment_totals["forward_seconds"] is not None:
+        total_segment_seconds = (
+            segment_totals["forward_seconds"]
+            + segment_totals["dictionary_grad_seconds"]
+            + segment_totals["weights_grad_seconds"]
+        )
+        other_segment_seconds = termination_elapsed_seconds - total_segment_seconds
     summary = {
         "method": "heitz_wasserstein_dictionary_learning",
         "returncode": returncode,
@@ -806,6 +1120,11 @@ def main() -> None:
         "termination_iteration": termination_iteration,
         "termination_loss": termination_loss,
         "termination_elapsed_seconds": termination_elapsed_seconds,
+        "segment_timing": {
+            **segment_totals,
+            "total_segment_seconds": total_segment_seconds,
+            "other_segment_seconds": other_segment_seconds,
+        },
         "history_path": str(history_path),
         "stdout_log": str(log_path),
         "run_dir": str(run_dir),
