@@ -879,7 +879,15 @@ def default_avx_mode() -> str:
     return "on"
 
 
-def build_binary(source_dir: Path, build_dir: Path, *, avx_mode: str, with_openmp: bool) -> Path:
+def build_binary(
+    source_dir: Path,
+    build_dir: Path,
+    *,
+    build_type: str,
+    avx_mode: str,
+    with_openmp: bool,
+    with_halide: bool,
+) -> Path:
     build_dir.mkdir(parents=True, exist_ok=True)
     with_avx = avx_mode == "on"
     if not with_avx:
@@ -887,8 +895,9 @@ def build_binary(source_dir: Path, build_dir: Path, *, avx_mode: str, with_openm
 
     cmake_cmd = [
         "cmake",
+        f"-DCMAKE_BUILD_TYPE={build_type}",
         f"-DWITH_OPENMP={'ON' if with_openmp else 'OFF'}",
-        "-DWITH_HALIDE=OFF",
+        f"-DWITH_HALIDE={'ON' if with_halide else 'OFF'}",
         "-DWITH_EIGEN=OFF",
         f"-DWITH_AVX_SUPPORT={'ON' if with_avx else 'OFF'}",
         "-DBUILD_APP_DICTIONARY_LEARNING=ON",
@@ -915,8 +924,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-per-digit", type=int, default=10)
     parser.add_argument("--digits", nargs="*", default=None)
     parser.add_argument("--force-data", action="store_true")
+    parser.add_argument("--build-type", default="Release",
+                        help="CMake build type for the unmodified Heitz source; Release matches normal benchmark builds.")
     parser.add_argument("--avx", choices=["auto", "on", "off"], default="auto")
     parser.add_argument("--with-openmp", action="store_true")
+    parser.add_argument("--with-halide", action="store_true",
+                        help="Enable the optional Halide backend shipped by the Heitz repository.")
     parser.add_argument("--k", type=int, default=4)
     parser.add_argument("--loss-type", type=int, default=2)
     parser.add_argument("--sinkhorn-iters", type=int, default=10)
@@ -964,7 +977,14 @@ def main() -> None:
     apply_segment_timing_patch(source_dir)
     apply_linux_cxx_link_patch(source_dir)
     avx_mode = default_avx_mode() if args.avx == "auto" else args.avx
-    binary = build_binary(source_dir, build_dir, avx_mode=avx_mode, with_openmp=args.with_openmp)
+    binary = build_binary(
+        source_dir,
+        build_dir,
+        build_type=args.build_type,
+        avx_mode=avx_mode,
+        with_openmp=args.with_openmp,
+        with_halide=args.with_halide,
+    )
 
     output_dir = run_dir / "outputs"
     if output_dir.exists():
@@ -1134,8 +1154,11 @@ def main() -> None:
         "source_commit": source_commit,
         "binary": str(binary),
         "build": {
+            "build_type": args.build_type,
             "avx": avx_mode,
             "with_openmp": args.with_openmp,
+            "with_halide": args.with_halide,
+            "with_eigen": False,
             "platform_machine": platform.machine(),
         },
         "parameters": {

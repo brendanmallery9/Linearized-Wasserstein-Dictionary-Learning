@@ -102,7 +102,7 @@ def mark2_args(args: argparse.Namespace, *, pavia_samples: int | None = None, mn
         top_k=args.top_k,
         lista_steps=args.lista_steps,
         epochs=args.epochs,
-        batch_size=args.batch_size,
+        batch_size=args.batch_size or pavia_samples or mnist_samples,
         lr=args.lr,
         sparsity_coeff=args.sparsity_coeff,
         weight_decay=args.weight_decay,
@@ -123,8 +123,10 @@ def mark2_args(args: argparse.Namespace, *, pavia_samples: int | None = None, mn
         heitz_scale_dict_factor=args.heitz_scale_dict_factor,
         heitz_lbfgs_epsilon=args.heitz_lbfgs_epsilon,
         heitz_max_optim_iter=args.heitz_max_optim_iter,
+        heitz_build_type=args.heitz_build_type,
         heitz_avx=args.heitz_avx,
         heitz_with_openmp=args.heitz_with_openmp,
+        heitz_with_halide=args.heitz_with_halide,
         heitz_warm_restart=args.heitz_warm_restart,
         heitz_sinkhorn_iters=args.heitz_sinkhorn_iters,
     )
@@ -286,7 +288,7 @@ def run_pavia_size(
             hidden_dim=args.atoms,
             top_k=args.top_k,
             lista_steps=args.lista_steps,
-            batch_size=args.batch_size,
+            batch_size=suite_args.batch_size,
             epochs=args.epochs,
             lr=HSI_LEGACY_SAE["lr"],
             sparsity_coeff=args.sparsity_coeff,
@@ -676,7 +678,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--top-k", type=int, default=3)
     parser.add_argument("--lista-steps", type=int, default=20)
     parser.add_argument("--epochs", type=int, default=1_000_000)
-    parser.add_argument("--batch-size", type=int, default=256)
+    parser.add_argument("--batch-size", type=int, default=None,
+                        help="BCM/EBCM batch size. Defaults to the trial sample size, e.g. 100 or 1000.")
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--sparsity-coeff", type=float, default=HSI_LEGACY_SAE["sparsity_coeff"])
     parser.add_argument("--weight-decay", type=float, default=0.1)
@@ -699,8 +702,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--heitz-loss-type", type=int, default=2)
     parser.add_argument("--heitz-scale-dict-factor", type=float, default=100.0)
     parser.add_argument("--heitz-lbfgs-epsilon", type=float, default=1e-50)
+    parser.add_argument("--heitz-build-type", default="Release")
     parser.add_argument("--heitz-avx", choices=["auto", "on", "off"], default="auto")
     parser.add_argument("--heitz-with-openmp", action="store_true")
+    parser.add_argument("--heitz-with-halide", action="store_true")
     parser.add_argument("--heitz-warm-restart", action="store_true")
     args = parser.parse_args()
 
@@ -755,6 +760,7 @@ def main() -> None:
             "pavia1d": {
                 str(sample_size): {
                     "lwdl": ["transport_map"],
+                    "batch_size": args.batch_size or sample_size,
                     "heitz_gammas": WDL_LWDL_TIMING_PAVIA_GAMMAS[sample_size],
                     "sinkhorn_iters": args.heitz_sinkhorn_iters,
                     "lbfgs_epsilon": args.heitz_lbfgs_epsilon,
@@ -765,6 +771,7 @@ def main() -> None:
             "mnist": {
                 str(sample_size): {
                     "lwdl": [f"ebcm_eps{MARK2_EPSILON:g}"],
+                    "batch_size": args.batch_size or sample_size,
                     "heitz_gammas": WDL_LWDL_TIMING_MNIST_GAMMAS[sample_size],
                     "sinkhorn_iters": args.heitz_sinkhorn_iters,
                     "lbfgs_epsilon": args.heitz_lbfgs_epsilon,

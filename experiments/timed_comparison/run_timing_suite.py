@@ -108,7 +108,7 @@ PRESETS = {
         "top_k": 3,
         "lista_steps": 20,
         "epochs": 500,
-        "batch_size": 256,
+        "batch_size": 100,
         "base_supp_size": 400,
         "pavia_samples": 100,
         "mnist_max_per_digit": 10,
@@ -1028,6 +1028,7 @@ def run_heitz_trial(
         "--max-optim-iter", args.heitz_max_optim_iter,
         "--gamma", gamma,
         "--scale-dict-factor", args.heitz_scale_dict_factor,
+        "--build-type", args.heitz_build_type,
         "--avx", args.heitz_avx,
         "--lbfgs-epsilon", args.heitz_lbfgs_epsilon,
         "--max-elapsed-seconds", args.max_elapsed_seconds if args.max_elapsed_seconds is not None else 0,
@@ -1040,6 +1041,8 @@ def run_heitz_trial(
         del cmd[idx:idx + 2]
     if args.heitz_with_openmp:
         cmd.append("--with-openmp")
+    if args.heitz_with_halide:
+        cmd.append("--with-halide")
     if getattr(args, "heitz_warm_restart", False):
         cmd.append("--warm-restart")
     returncode, elapsed = stream_command(
@@ -1908,8 +1911,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--heitz-loss-type", type=int, default=2)
     parser.add_argument("--heitz-scale-dict-factor", type=float, default=100.0)
     parser.add_argument("--heitz-lbfgs-epsilon", type=float, default=1e-50)
+    parser.add_argument("--heitz-build-type", default="Release")
     parser.add_argument("--heitz-avx", choices=["auto", "on", "off"], default="auto")
     parser.add_argument("--heitz-with-openmp", action="store_true")
+    parser.add_argument("--heitz-with-halide", action="store_true")
     parser.add_argument("--heitz-warm-restart", action="store_true")
     args = parser.parse_args()
 
