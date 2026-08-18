@@ -469,6 +469,17 @@ def main():
 
         mappings = torch.stack(maps_list)  # (N_cls, base_supp_size, 3)
         torch.save(mappings, cls_dir / "mappings.pt")
+
+        # Also persist the raw target clouds (mu_i) that generated these maps,
+        # in the SAME order as `mappings`.  These are the pre-OT ground-truth
+        # measures; downstream baselines that work directly on point clouds
+        # (e.g. the PointNet autoencoder) and the native Wasserstein
+        # reconstruction metric use them instead of the transported base points.
+        raw_clouds = torch.stack([
+            torch.as_tensor(p, dtype=torch.float32) for p in clouds[:len(maps_list)]
+        ])  # (N_cls, cloud_supp_size, 3)
+        torch.save(raw_clouds, cls_dir / "raw_clouds.pt")
+
         class_counts[cls] = len(maps_list)
         cls_elapsed = time.time() - cls_start
         total_elapsed = time.time() - t_start
