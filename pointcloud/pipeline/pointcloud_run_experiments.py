@@ -41,6 +41,7 @@ from mnist_sae_models import (
     TransportMapSAE,
     make_grid_nd,
 )
+from pointcloud.pipeline.pointcloud_centered_sae import CenteredDisplacementFieldSAE
 from pointcloud.pipeline.pointcloud_data import (
     load_transport_maps,
     make_dataloaders,
@@ -126,8 +127,8 @@ DEFAULT_CONFIG = dict(
 
     # Model / atoms
     m=20,
-    grid_side=10,            # only used if grid_mode="uniform" (10^3 = 1000 pts)
-    grid_mode="cloud_mixture",   # "uniform" or "cloud_mixture"
+    grid_side=17,            # only used if grid_mode="uniform" (17^3 = 4913 pts)
+    grid_mode="uniform",     # "uniform" or "cloud_mixture"
     grid_n_clouds=10,
     grid_support_size=3000,
     lista_steps=20,
@@ -135,19 +136,19 @@ DEFAULT_CONFIG = dict(
     topk_k=3,                # k for topk / topk_simplex
 
     # Training
-    batch_size=64,
+    batch_size=128,
     epochs=2000,
     lr=1e-3,
     optimizer="adamw",
-    weight_decay=0.1,
-    scheduler="none",
-    lr_min=0.0,
+    weight_decay=1e-4,
+    scheduler="cosine",
+    lr_min=1e-6,
     grad_clip_norm=None,
 
     # Sweep
     epsilons=[0.025],
     sparsity_coeffs=[1e-4],
-    methods=["displacement"],
+    methods=["centered_displacement"],
 
     # Output
     output_dir=str(REPO_ROOT / "pointcloud" / "results" / "geomshapes"),
@@ -205,6 +206,16 @@ def clone_model_state(model):
         k: v.detach().cpu().clone()
         for k, v in model.state_dict().items()
     }
+
+
+def train_split_displacement_center(train_loader, maps, X):
+    """Mean displacement field over the train split only."""
+    dataset = train_loader.dataset
+    if not hasattr(dataset, "indices"):
+        raise ValueError("Expected train_loader.dataset to be a Subset with indices")
+    train_idx = torch.as_tensor(dataset.indices, dtype=torch.long)
+    train_maps = maps[train_idx].float()
+    return (train_maps - X.unsqueeze(0)).mean(dim=0)
 
 
 def train_one_model(model, train_loader, test_loader, config, device):
@@ -371,15 +382,21 @@ def run_all_experiments(config=None):
               f"c={c}  [device={device}]")
         print(f"{'='*60}")
 
+        displacement_center = None
         if method == "raw_map":
             model_cls = TransportMapSAE
         elif method == "displacement":
             model_cls = DisplacementFieldSAE
+        elif method == "centered_displacement":
+            model_cls = CenteredDisplacementFieldSAE
+            displacement_center = train_split_displacement_center(
+                train_loader, maps, X,
+            )
         else:
             raise ValueError(f"Unknown method: {method}")
 
-        model = model_cls(
-            X, m=config["m"], eps=eps,
+        model_kwargs = dict(
+            m=config["m"], eps=eps,
             grid_side=config["grid_side"],
             lista_steps=config["lista_steps"],
             grid_points=grid_points,
@@ -388,7 +405,13 @@ def run_all_experiments(config=None):
             lateral_init="damped_identity",
             activation_type=config["activation_type"],
             topk_k=config["topk_k"],
-        ).to(device)
+        )
+        if displacement_center is not None:
+            model = model_cls(
+                X, displacement_center=displacement_center, **model_kwargs,
+            ).to(device)
+        else:
+            model = model_cls(X, **model_kwargs).to(device)
 
         run_config = dict(config, sparsity_coeff=c, name=run_name)
 
@@ -446,6 +469,8 @@ def run_all_experiments(config=None):
             "grid_points": grid_points,
             "X": X,
         }
+        if displacement_center is not None:
+            common_ckpt["displacement_center"] = displacement_center
         torch.save({
             **common_ckpt,
             "model_state": train_result["final_state"],
@@ -497,7 +522,8 @@ if __name__ == "__main__":
                         default=DEFAULT_CONFIG["epsilons"])
     parser.add_argument("--methods", type=str, nargs="+",
                         default=DEFAULT_CONFIG["methods"],
-                        choices=["raw_map", "displacement"])
+                        choices=["raw_map", "displacement",
+                                 "centered_displacement"])
     parser.add_argument("--device", type=str, default=DEFAULT_CONFIG["device"],
                         choices=["auto", "cuda", "mps", "cpu"])
     parser.add_argument("--gpu_ids", type=int, nargs="*", default=None)

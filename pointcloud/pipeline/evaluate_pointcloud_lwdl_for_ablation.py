@@ -5,12 +5,13 @@ point-cloud ablation.
 
 This does NOT train anything and does NOT touch the source result directory.
 It rehydrates the model from a checkpoint (which stores X, grid_points, m, eps,
-lista_steps, method), re-encodes the maps of both splits into LWDL coefficients,
-reconstructs the maps, and (as a CLI) writes a metrics row compatible with the
-PCA / sparse-coding rows produced by run_pointcloud_minimal_ablation.py.
+lista_steps, method, and the displacement center for centered runs), re-encodes
+the maps of both splits into LWDL coefficients, reconstructs the maps, and (as a
+CLI) writes a metrics row compatible with the PCA / sparse-coding rows produced
+by run_pointcloud_minimal_ablation.py.
 
-Supported methods: "displacement" (the main ModelNet run) and "raw_map".
-Centered / whitened variants raise a clear error -- extend here if needed.
+Supported methods: "centered_displacement" (the main ModelNet run),
+"displacement", and "raw_map".
 
 Usage (standalone):
     python pointcloud/pipeline/evaluate_pointcloud_lwdl_for_ablation.py \
@@ -36,6 +37,7 @@ for p in (str(REPO_ROOT), str(MNIST_PIPELINE)):
 import torch
 
 from mnist_sae_models import DisplacementFieldSAE, TransportMapSAE
+from pointcloud.pipeline.pointcloud_centered_sae import CenteredDisplacementFieldSAE
 from pointcloud.pipeline.pointcloud_data import (
     load_with_labels,
     make_split_indices,
@@ -103,10 +105,11 @@ def build_model_from_checkpoint(ckpt, config, device):
     """
     Reconstruct the trained SAE architecture and load its weights.
 
-    Structural hyperparameters (X, grid_points, m, eps, lista_steps, method)
-    come from the checkpoint; activation details come from config.json with
-    the same defaults the training runner uses.  normalize_atoms / per_atom_gain
-    / lateral_init are fixed to the values hardcoded in
+    Structural hyperparameters (X, grid_points, m, eps, lista_steps, method,
+    and displacement_center when centered) come from the checkpoint; activation
+    details come from config.json with the same defaults the training runner
+    uses.  normalize_atoms / per_atom_gain / lateral_init are fixed to the values
+    hardcoded in
     pointcloud_run_experiments.py.
     """
     method = ckpt.get("method", "displacement")
@@ -138,13 +141,22 @@ def build_model_from_checkpoint(ckpt, config, device):
 
     if method == "displacement":
         model_cls = DisplacementFieldSAE
+        model_args = (X,)
+    elif method == "centered_displacement":
+        model_cls = CenteredDisplacementFieldSAE
+        if "displacement_center" not in ckpt:
+            raise KeyError(
+                "Centered checkpoint is missing 'displacement_center'. "
+                "Retrain with the updated pointcloud_run_experiments.py."
+            )
+        model_args = (X, ckpt["displacement_center"].float())
     elif method == "raw_map":
         model_cls = TransportMapSAE
+        model_args = (X,)
     else:
         raise NotImplementedError(
-            f"LWDL ablation evaluator supports methods 'displacement' and "
-            f"'raw_map'; got {method!r}. Extend build_model_from_checkpoint "
-            f"to rehydrate centered/whitened variants."
+            f"LWDL ablation evaluator supports methods 'centered_displacement', "
+            f"'displacement', and 'raw_map'; got {method!r}."
         )
 
     # Only pass kwargs the installed model actually accepts -- the SAE classes
@@ -157,7 +169,7 @@ def build_model_from_checkpoint(ckpt, config, device):
         print(f"  Note: model {model_cls.__name__} does not accept "
               f"{dropped}; using its defaults for those.")
     model_kwargs = {k: v for k, v in model_kwargs.items() if k in valid}
-    model = model_cls(X, **model_kwargs)
+    model = model_cls(*model_args, **model_kwargs)
 
     missing, unexpected = model.load_state_dict(ckpt["model_state"], strict=False)
     if missing or unexpected:
@@ -172,7 +184,7 @@ def build_model_from_checkpoint(ckpt, config, device):
 # ============================================================
 
 @torch.no_grad()
-def encode_reconstruct(model, maps_subset, device, batch_size=64):
+def encode_reconstruct(model, maps_subset, device, batch_size=128):
     """
     Run the SAE forward pass over a subset of maps.
 
@@ -198,7 +210,7 @@ def encode_reconstruct(model, maps_subset, device, batch_size=64):
 # ============================================================
 
 def evaluate_lwdl(data_dir, results_dir, split_path, checkpoint=None,
-                  batch_size=64, device="auto", classes=None,
+                  batch_size=128, device="auto", classes=None,
                   test_fraction=0.1, seed=42):
     """
     Rehydrate the trained LWDL model and encode/reconstruct both splits.
@@ -276,7 +288,7 @@ def main():
     parser.add_argument("--checkpoint", type=str, default=None)
     parser.add_argument("--split_path", type=str, required=True)
     parser.add_argument("--output_dir", type=str, required=True)
-    parser.add_argument("--batch_size", type=int, default=64)
+    parser.add_argument("--batch_size", type=int, default=128)
     parser.add_argument("--device", type=str, default="auto",
                         choices=["auto", "cuda", "mps", "cpu"])
     parser.add_argument("--test_fraction", type=float, default=0.1)

@@ -308,7 +308,7 @@ def main():
                              "(default: read from LWDL metrics, fallback 10).")
     parser.add_argument("--test_fraction", type=float, default=0.1)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--batch_size", type=int, default=64)
+    parser.add_argument("--batch_size", type=int, default=128)
     parser.add_argument("--device", type=str, default="auto",
                         choices=["auto", "cuda", "mps", "cpu"])
     parser.add_argument("--wasserstein_metric", type=str, default="sqeuclidean",

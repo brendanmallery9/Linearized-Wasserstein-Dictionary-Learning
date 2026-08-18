@@ -24,15 +24,27 @@ M="${M:-20}"
 EPOCHS="${EPOCHS:-1000}"                 # LWDL training epochs
 SEED="${SEED:-42}"
 CLASSES="${CLASSES:-bed chair monitor sofa table toilet}"
+BATCH_SIZE="${BATCH_SIZE:-128}"
+GRID_MODE="${GRID_MODE:-uniform}"
+GRID_SIDE="${GRID_SIDE:-17}"
+METHOD="${METHOD:-centered_displacement}"
+WEIGHT_DECAY="${WEIGHT_DECAY:-0.0001}"
+SCHEDULER="${SCHEDULER:-cosine}"
+LR_MIN="${LR_MIN:-1e-6}"
 
 DATA_DIR="${DATA_DIR:-datasets/modelnet10_6cls_ot_withraw}"
-LWDL_DIR="${LWDL_DIR:-pointcloud/results/modelnet10_6cls_m${M}}"
-OUT_DIR="${OUT_DIR:-pointcloud/results/minimal_ablation_cuda}"
+LWDL_DIR="${LWDL_DIR:-pointcloud/results/modelnet10_6cls_${METHOD}_${GRID_MODE}${GRID_SIDE}_m${M}}"
+OUT_DIR="${OUT_DIR:-pointcloud/results/minimal_ablation_${METHOD}_${GRID_MODE}${GRID_SIDE}_m${M}}"
 
 echo "=== minimal ablation (CUDA) ==="
 echo "python:   $PYTHON"
 echo "device:   $DEVICE"
 echo "m:        $M    epochs: $EPOCHS"
+echo "method:   $METHOD"
+echo "grid:     $GRID_MODE side=$GRID_SIDE"
+echo "batch:    $BATCH_SIZE"
+echo "wd:       $WEIGHT_DECAY"
+echo "sched:    $SCHEDULER lr_min=$LR_MIN"
 echo "data_dir: $DATA_DIR"
 echo "lwdl_dir: $LWDL_DIR"
 echo "out_dir:  $OUT_DIR"
@@ -67,6 +79,11 @@ if [ ! -f "$LWDL_DIR/config.json" ]; then
   "$PYTHON" -u pointcloud/pipeline/pointcloud_run_experiments.py \
     --data_dir "$DATA_DIR" --output_dir "$LWDL_DIR" \
     --m "$M" --epochs "$EPOCHS" --seed "$SEED" \
+    --batch_size "$BATCH_SIZE" \
+    --grid_mode "$GRID_MODE" --grid_side "$GRID_SIDE" \
+    --methods "$METHOD" \
+    --weight_decay "$WEIGHT_DECAY" \
+    --scheduler "$SCHEDULER" --lr_min "$LR_MIN" \
     --device "$DEVICE" --classes $CLASSES
 else
   echo ">>> [2/3] LWDL checkpoint already present ($LWDL_DIR); skipping training."
@@ -77,7 +94,7 @@ echo ">>> [3/3] Running ablation -> $OUT_DIR"
 "$PYTHON" -u pointcloud/pipeline/run_pointcloud_minimal_ablation.py \
   --data_dir "$DATA_DIR" --lwdl_results_dir "$LWDL_DIR" \
   --output_dir "$OUT_DIR" --m "$M" --seed "$SEED" \
-  --device "$DEVICE"
+  --batch_size "$BATCH_SIZE" --device "$DEVICE"
 
 echo ""
 echo "Done. Table:"
