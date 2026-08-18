@@ -21,6 +21,7 @@ Usage (standalone):
 """
 
 import argparse
+import inspect
 import json
 import sys
 import time
@@ -136,15 +137,27 @@ def build_model_from_checkpoint(ckpt, config, device):
     )
 
     if method == "displacement":
-        model = DisplacementFieldSAE(X, **model_kwargs)
+        model_cls = DisplacementFieldSAE
     elif method == "raw_map":
-        model = TransportMapSAE(X, **model_kwargs)
+        model_cls = TransportMapSAE
     else:
         raise NotImplementedError(
             f"LWDL ablation evaluator supports methods 'displacement' and "
             f"'raw_map'; got {method!r}. Extend build_model_from_checkpoint "
             f"to rehydrate centered/whitened variants."
         )
+
+    # Only pass kwargs the installed model actually accepts -- the SAE classes
+    # have gained optional args over time (e.g. softtopk_tau), so filtering by
+    # the constructor signature keeps this evaluator compatible with both older
+    # and newer mnist_sae_models.py without crashing on unknown keywords.
+    valid = set(inspect.signature(model_cls.__init__).parameters)
+    dropped = [k for k in model_kwargs if k not in valid]
+    if dropped:
+        print(f"  Note: model {model_cls.__name__} does not accept "
+              f"{dropped}; using its defaults for those.")
+    model_kwargs = {k: v for k, v in model_kwargs.items() if k in valid}
+    model = model_cls(X, **model_kwargs)
 
     missing, unexpected = model.load_state_dict(ckpt["model_state"], strict=False)
     if missing or unexpected:
