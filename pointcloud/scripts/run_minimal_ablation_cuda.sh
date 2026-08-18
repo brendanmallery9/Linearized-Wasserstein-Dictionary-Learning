@@ -27,20 +27,22 @@ CLASSES="${CLASSES:-bed chair monitor sofa table toilet}"
 BATCH_SIZE="${BATCH_SIZE:-128}"
 GRID_MODE="${GRID_MODE:-uniform}"
 GRID_SIDE="${GRID_SIDE:-17}"
-METHOD="${METHOD:-centered_displacement}"
+METHOD="${METHOD:-displacement_centered}"
+DISPLACEMENT_CENTER_MODE="${DISPLACEMENT_CENTER_MODE:-data_mean}"
 WEIGHT_DECAY="${WEIGHT_DECAY:-0.0001}"
 SCHEDULER="${SCHEDULER:-cosine}"
 LR_MIN="${LR_MIN:-1e-6}"
 
 DATA_DIR="${DATA_DIR:-datasets/modelnet10_6cls_ot_withraw}"
-LWDL_DIR="${LWDL_DIR:-pointcloud/results/modelnet10_6cls_${METHOD}_${GRID_MODE}${GRID_SIDE}_m${M}}"
-OUT_DIR="${OUT_DIR:-pointcloud/results/minimal_ablation_${METHOD}_${GRID_MODE}${GRID_SIDE}_m${M}}"
+LWDL_DIR="${LWDL_DIR:-pointcloud/results/modelnet10_6cls_${METHOD}_${DISPLACEMENT_CENTER_MODE}_${GRID_MODE}${GRID_SIDE}_m${M}}"
+OUT_DIR="${OUT_DIR:-pointcloud/results/minimal_ablation_${METHOD}_${DISPLACEMENT_CENTER_MODE}_${GRID_MODE}${GRID_SIDE}_m${M}}"
 
 echo "=== minimal ablation (CUDA) ==="
 echo "python:   $PYTHON"
 echo "device:   $DEVICE"
 echo "m:        $M    epochs: $EPOCHS"
 echo "method:   $METHOD"
+echo "center:   $DISPLACEMENT_CENTER_MODE"
 echo "grid:     $GRID_MODE side=$GRID_SIDE"
 echo "batch:    $BATCH_SIZE"
 echo "wd:       $WEIGHT_DECAY"
@@ -82,6 +84,7 @@ if [ ! -f "$LWDL_DIR/config.json" ]; then
     --batch_size "$BATCH_SIZE" \
     --grid_mode "$GRID_MODE" --grid_side "$GRID_SIDE" \
     --methods "$METHOD" \
+    --displacement_center_mode "$DISPLACEMENT_CENTER_MODE" \
     --weight_decay "$WEIGHT_DECAY" \
     --scheduler "$SCHEDULER" --lr_min "$LR_MIN" \
     --device "$DEVICE" --classes $CLASSES

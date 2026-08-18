@@ -134,6 +134,7 @@ DEFAULT_CONFIG = dict(
     lista_steps=20,
     activation_type="relu",  # "relu" | "jumprelu" | "topk" | "topk_simplex"
     topk_k=3,                # k for topk / topk_simplex
+    displacement_center_mode="data_mean",  # data_mean | train_mean
 
     # Training
     batch_size=128,
@@ -148,7 +149,7 @@ DEFAULT_CONFIG = dict(
     # Sweep
     epsilons=[0.025],
     sparsity_coeffs=[1e-4],
-    methods=["centered_displacement"],
+    methods=["displacement_centered"],
 
     # Output
     output_dir=str(REPO_ROOT / "pointcloud" / "results" / "geomshapes"),
@@ -208,14 +209,23 @@ def clone_model_state(model):
     }
 
 
-def train_split_displacement_center(train_loader, maps, X):
-    """Mean displacement field over the train split only."""
-    dataset = train_loader.dataset
-    if not hasattr(dataset, "indices"):
-        raise ValueError("Expected train_loader.dataset to be a Subset with indices")
-    train_idx = torch.as_tensor(dataset.indices, dtype=torch.long)
-    train_maps = maps[train_idx].float()
-    return (train_maps - X.unsqueeze(0)).mean(dim=0)
+def make_displacement_center(train_loader, maps, X, mode):
+    """Build the fixed displacement center for displacement_centered runs."""
+    mode = str(mode)
+    if mode == "data_mean":
+        center_maps = maps.float()
+    elif mode == "train_mean":
+        dataset = train_loader.dataset
+        if not hasattr(dataset, "indices"):
+            raise ValueError("Expected train_loader.dataset to be a Subset with indices")
+        train_idx = torch.as_tensor(dataset.indices, dtype=torch.long)
+        center_maps = maps[train_idx].float()
+    else:
+        raise ValueError(
+            "Point-cloud displacement_center_mode must be one of: "
+            f"data_mean, train_mean. Got {mode!r}."
+        )
+    return (center_maps - X.unsqueeze(0)).mean(dim=0)
 
 
 def train_one_model(model, train_loader, test_loader, config, device):
@@ -387,10 +397,10 @@ def run_all_experiments(config=None):
             model_cls = TransportMapSAE
         elif method == "displacement":
             model_cls = DisplacementFieldSAE
-        elif method == "centered_displacement":
+        elif method in ("displacement_centered", "centered_displacement"):
             model_cls = CenteredDisplacementFieldSAE
-            displacement_center = train_split_displacement_center(
-                train_loader, maps, X,
+            displacement_center = make_displacement_center(
+                train_loader, maps, X, config["displacement_center_mode"],
             )
         else:
             raise ValueError(f"Unknown method: {method}")
@@ -471,6 +481,7 @@ def run_all_experiments(config=None):
         }
         if displacement_center is not None:
             common_ckpt["displacement_center"] = displacement_center
+            common_ckpt["displacement_center_mode"] = config["displacement_center_mode"]
         torch.save({
             **common_ckpt,
             "model_state": train_result["final_state"],
@@ -523,7 +534,12 @@ if __name__ == "__main__":
     parser.add_argument("--methods", type=str, nargs="+",
                         default=DEFAULT_CONFIG["methods"],
                         choices=["raw_map", "displacement",
+                                 "displacement_centered",
                                  "centered_displacement"])
+    parser.add_argument("--displacement_center_mode", type=str,
+                        default=DEFAULT_CONFIG["displacement_center_mode"],
+                        choices=["data_mean", "train_mean"],
+                        help="Center source for displacement_centered runs.")
     parser.add_argument("--device", type=str, default=DEFAULT_CONFIG["device"],
                         choices=["auto", "cuda", "mps", "cpu"])
     parser.add_argument("--gpu_ids", type=int, nargs="*", default=None)

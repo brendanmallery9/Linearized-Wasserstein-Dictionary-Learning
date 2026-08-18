@@ -10,7 +10,7 @@ the maps of both splits into LWDL coefficients, reconstructs the maps, and (as a
 CLI) writes a metrics row compatible with the PCA / sparse-coding rows produced
 by run_pointcloud_minimal_ablation.py.
 
-Supported methods: "centered_displacement" (the main ModelNet run),
+Supported methods: "displacement_centered" (the main ModelNet run),
 "displacement", and "raw_map".
 
 Usage (standalone):
@@ -142,7 +142,7 @@ def build_model_from_checkpoint(ckpt, config, device):
     if method == "displacement":
         model_cls = DisplacementFieldSAE
         model_args = (X,)
-    elif method == "centered_displacement":
+    elif method in ("displacement_centered", "centered_displacement"):
         model_cls = CenteredDisplacementFieldSAE
         if "displacement_center" not in ckpt:
             raise KeyError(
@@ -155,7 +155,7 @@ def build_model_from_checkpoint(ckpt, config, device):
         model_args = (X,)
     else:
         raise NotImplementedError(
-            f"LWDL ablation evaluator supports methods 'centered_displacement', "
+            f"LWDL ablation evaluator supports methods 'displacement_centered', "
             f"'displacement', and 'raw_map'; got {method!r}."
         )
 

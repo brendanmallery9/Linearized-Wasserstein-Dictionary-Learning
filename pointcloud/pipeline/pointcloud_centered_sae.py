@@ -2,8 +2,8 @@
 Point-cloud-specific centered displacement SAE.
 
 This keeps the point-cloud runner self-contained without depending on MNIST WIP
-model variants.  The model subtracts a fixed train-split mean displacement field
-before encoding and adds it back during decoding.
+model variants.  The model subtracts a fixed mean displacement field before
+encoding and adds it back during decoding.
 """
 
 import sys
