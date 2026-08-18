@@ -37,11 +37,8 @@ import numpy as np
 import torch
 
 from mnist_sae_models import (
-    CenteredDisplacementFieldSAE,
     DisplacementFieldSAE,
-    PCRemovedCenteredDisplacementFieldSAE,
     TransportMapSAE,
-    WhitenedCenteredDisplacementFieldSAE,
     make_grid_nd,
 )
 from pointcloud.pipeline.pointcloud_data import (
@@ -126,7 +123,6 @@ DEFAULT_CONFIG = dict(
     classes=None,            # None = all classes found on disk
     test_fraction=0.1,
     seed=42,
-    model_seed=None,
 
     # Model / atoms
     m=20,
@@ -135,12 +131,8 @@ DEFAULT_CONFIG = dict(
     grid_n_clouds=10,
     grid_support_size=3000,
     lista_steps=20,
-    activation_type="relu",  # "relu" | "jumprelu" | "final_jumprelu" | "topk" | "topk_simplex" | "softtopk" | "final_softtopk" | "final_softtopk_simplex"
-    topk_k=3,                # k for topk / topk_simplex / softtopk
-    softtopk_tau=0.1,
-    softtopk_tau_start=None,
-    softtopk_tau_end=None,
-    softtopk_tau_anneal_epochs=None,
+    activation_type="relu",  # "relu" | "jumprelu" | "topk" | "topk_simplex"
+    topk_k=3,                # k for topk / topk_simplex
 
     # Training
     batch_size=64,
@@ -151,20 +143,11 @@ DEFAULT_CONFIG = dict(
     scheduler="none",
     lr_min=0.0,
     grad_clip_norm=None,
-    sparsity_warmup=0,
-    init_checkpoint=None,
 
     # Sweep
     epsilons=[0.025],
     sparsity_coeffs=[1e-4],
     methods=["displacement"],
-    displacement_center_mode="generator_mean",
-    displacement_pc_index=1,
-    displacement_pc_count=1,
-    displacement_pc_mode="dataset_pca",
-    whitening_mode="dataset_zca",
-    whitening_eps=1e-4,
-    whitening_max_samples=None,
 
     # Output
     output_dir=str(REPO_ROOT / "pointcloud" / "results" / "geomshapes"),
@@ -189,12 +172,9 @@ def compute_losses(model, loader, sparsity_coeff, device):
 
     with torch.no_grad():
         for T_batch in loader:
-            T_batch, aux_batch = unpack_transport_batch(T_batch, device)
+            T_batch = T_batch.to(device).float()
             B = T_batch.shape[0]
-            T_hat, lam = (
-                model(T_batch, aux_batch)
-                if aux_batch is not None else model(T_batch)
-            )
+            T_hat, lam = model(T_batch)
 
             diff_sq = ((T_batch - T_hat) ** 2).sum(dim=(1, 2))
             recon_per_sample = 0.5 * diff_sq / n
@@ -227,134 +207,10 @@ def clone_model_state(model):
     }
 
 
-def load_displacement_center(data_dir, X, maps, mode="generator_mean"):
-    """Fixed residual baseline for `displacement_centered` runs."""
-    data_dir = Path(data_dir)
-    if mode in (None, "none"):
-        return torch.zeros_like(X)
-    if mode == "generator_mean":
-        base_maps_path = data_dir / "base_maps.pt"
-        if base_maps_path.exists():
-            base_maps = torch.load(base_maps_path, map_location="cpu").float()
-            return base_maps.mean(dim=0) - X
-        print("  Warning: base_maps.pt not found; using dataset mean displacement center")
-        return maps.mean(dim=0) - X
-    if mode == "dataset_mean":
-        return maps.mean(dim=0) - X
-    raise ValueError(f"Unknown displacement_center_mode: {mode}")
-
-
-def load_displacement_whitening(data_dir, X, maps, displacement_center,
-                                mode="dataset_zca", eps=1e-4,
-                                max_samples=None, seed=42):
-    """Build a fixed ZCA whitening / unwhitening pair for centered residuals."""
-    D = X.numel()
-    if mode in (None, "none"):
-        eye = torch.eye(D, dtype=X.dtype)
-        return eye, eye
-
-    data_dir = Path(data_dir)
-    if mode == "dataset_zca":
-        source = maps
-    elif mode == "generator_zca":
-        base_maps_path = data_dir / "base_maps.pt"
-        if not base_maps_path.exists():
-            raise FileNotFoundError(
-                f"whitening_mode=generator_zca requires {base_maps_path}"
-            )
-        source = torch.load(base_maps_path, map_location="cpu").float()
-    else:
-        raise ValueError(f"Unknown whitening_mode: {mode}")
-
-    residuals = source.float() - X.unsqueeze(0) - displacement_center.unsqueeze(0)
-    if max_samples is not None and max_samples > 0 and residuals.shape[0] > max_samples:
-        gen = torch.Generator().manual_seed(int(seed))
-        idx = torch.randperm(residuals.shape[0], generator=gen)[: int(max_samples)]
-        residuals = residuals[idx]
-
-    R = residuals.reshape(residuals.shape[0], -1).double()
-    second_moment = (R.T @ R) / max(R.shape[0], 1)
-    evals, evecs = torch.linalg.eigh(second_moment)
-    evals = evals.clamp(min=0.0)
-    eps = float(eps)
-    inv_sqrt = torch.rsqrt(evals + eps)
-    sqrt = torch.sqrt(evals + eps)
-    W = (evecs * inv_sqrt.unsqueeze(0)) @ evecs.T
-    Winv = (evecs * sqrt.unsqueeze(0)) @ evecs.T
-    return W.to(dtype=X.dtype), Winv.to(dtype=X.dtype)
-
-
-def load_displacement_pc_components(data_dir, X, maps, displacement_center,
-                                    mode="dataset_pca", pc_index=1, pc_count=1,
-                                   max_samples=None, seed=42):
-    """Return unit principal components of centered residual fields."""
-    data_dir = Path(data_dir)
-    if mode == "dataset_pca":
-        source = maps
-    elif mode == "generator_pca":
-        base_maps_path = data_dir / "base_maps.pt"
-        if not base_maps_path.exists():
-            raise FileNotFoundError(
-                f"displacement_pc_mode=generator_pca requires {base_maps_path}"
-            )
-        source = torch.load(base_maps_path, map_location="cpu").float()
-    else:
-        raise ValueError(f"Unknown displacement_pc_mode: {mode}")
-
-    residuals = source.float() - X.unsqueeze(0) - displacement_center.unsqueeze(0)
-    if max_samples is not None and max_samples > 0 and residuals.shape[0] > max_samples:
-        gen = torch.Generator().manual_seed(int(seed))
-        idx = torch.randperm(residuals.shape[0], generator=gen)[: int(max_samples)]
-        residuals = residuals[idx]
-
-    R = residuals.reshape(residuals.shape[0], -1).double()
-    second_moment = (R.T @ R) / max(R.shape[0], 1)
-    evals, evecs = torch.linalg.eigh(second_moment)
-    order = torch.argsort(evals, descending=True)
-    pc_index = int(pc_index)
-    pc_count = int(pc_count)
-    if pc_count <= 0:
-        raise ValueError(f"displacement_pc_count must be positive, got {pc_count}")
-    if pc_index < 0 or pc_index + pc_count > order.numel():
-        raise ValueError(
-            f"PC range [{pc_index}, {pc_index + pc_count}) is out of range for "
-            f"{order.numel()} residual dimensions"
-        )
-    chosen = order[pc_index: pc_index + pc_count]
-    pcs = evecs[:, chosen].T.to(dtype=X.dtype).reshape(pc_count, *X.shape)
-    pcs = pcs / pcs.reshape(pc_count, -1).norm(dim=1).clamp(min=1e-8).view(pc_count, 1, 1)
-    variances = [float(evals[idx].item()) for idx in chosen]
-    return pcs, variances
-
-
-def precompute_whitened_residuals(maps, X, displacement_center,
-                                  whitening_matrix, batch_size=4096):
-    """Cache W(T - Id - center) once for a fixed dataset."""
-    center_flat = (X + displacement_center).reshape(1, -1)
-    Wt = whitening_matrix.T
-    out = torch.empty_like(maps)
-    for start in range(0, maps.shape[0], batch_size):
-        batch = maps[start:start + batch_size]
-        residual_flat = batch.reshape(batch.shape[0], -1) - center_flat
-        whitened = residual_flat @ Wt
-        out[start:start + batch_size] = whitened.reshape_as(batch)
-    return out
-
-
-def unpack_transport_batch(batch, device):
-    """Return raw maps plus optional cached whitened residuals."""
-    if isinstance(batch, (tuple, list)):
-        T_batch = batch[0].to(device).float()
-        aux_batch = batch[1].to(device).float() if len(batch) > 1 else None
-        return T_batch, aux_batch
-    return batch.to(device).float(), None
-
-
 def train_one_model(model, train_loader, test_loader, config, device):
     c = config["sparsity_coeff"]
     n = model.n
     grad_clip_norm = config.get("grad_clip_norm")
-    sparsity_warmup = int(config.get("sparsity_warmup", 0) or 0)
 
     if config["optimizer"] == "adamw":
         opt = torch.optim.AdamW(model.parameters(), lr=config["lr"],
@@ -372,19 +228,6 @@ def train_one_model(model, train_loader, test_loader, config, device):
     if grad_clip_norm is not None and grad_clip_norm > 0:
         print(f"  Gradient clipping: max_norm={grad_clip_norm:g}", flush=True)
 
-    tau_start = config.get("softtopk_tau_start")
-    tau_end = config.get("softtopk_tau_end")
-    use_tau_anneal = tau_start is not None and tau_end is not None
-    if use_tau_anneal:
-        tau_start = float(tau_start)
-        tau_end = float(tau_end)
-        tau_anneal_epochs = config.get("softtopk_tau_anneal_epochs")
-        if tau_anneal_epochs is None:
-            tau_anneal_epochs = config["epochs"]
-        tau_anneal_epochs = max(1, int(tau_anneal_epochs))
-        print(f"  SoftTopK tau anneal: {tau_start:g} -> {tau_end:g} "
-              f"over {tau_anneal_epochs} epoch(s)", flush=True)
-
     best_epoch = 0
     best_epoch_loss = float("inf")
     best_state = clone_model_state(model)
@@ -392,29 +235,16 @@ def train_one_model(model, train_loader, test_loader, config, device):
     model.train()
     for epoch in range(config["epochs"]):
         cur_eps = model.atoms_module.eps
-        cur_tau = None
-        if use_tau_anneal:
-            denom = max(tau_anneal_epochs - 1, 1)
-            frac = min(epoch, tau_anneal_epochs - 1) / denom
-            cur_tau = tau_start + frac * (tau_end - tau_start)
-            model.encoder.softtopk_tau = cur_tau
         epoch_loss = 0.0
         epoch_steps = 0
 
         for T_batch in train_loader:
-            T_batch, aux_batch = unpack_transport_batch(T_batch, device)
-            T_hat, lam = (
-                model(T_batch, aux_batch)
-                if aux_batch is not None else model(T_batch)
-            )
+            T_batch = T_batch.to(device).float()
+            T_hat, lam = model(T_batch)
 
             diff_sq = ((T_batch - T_hat) ** 2).sum(dim=(1, 2))
             recon = 0.5 * diff_sq.mean() / n
-            if sparsity_warmup > 0 and epoch < sparsity_warmup:
-                c_eff = c * (epoch + 1) / sparsity_warmup
-            else:
-                c_eff = c
-            sparsity = c_eff * lam.abs().sum(dim=1).mean()
+            sparsity = c * lam.abs().sum(dim=1).mean()
             loss = recon + sparsity
 
             opt.zero_grad()
@@ -443,9 +273,7 @@ def train_one_model(model, train_loader, test_loader, config, device):
             prefix = f"[{tag}] " if tag else "  "
             print(f"{prefix}Epoch {epoch+1:4d}/{config['epochs']}  loss={avg_loss:.6f}  "
                   f"best={best_epoch_loss:.6f}@{best_epoch}  "
-                  f"lr={lr_now:.2e}  eps={cur_eps:.4g}  c={c_eff:.4g}"
-                  + (f"  tau={cur_tau:.4g}" if cur_tau is not None else ""),
-                  flush=True)
+                  f"lr={lr_now:.2e}  eps={cur_eps:.4g}  c={c:.4g}", flush=True)
 
     final_state = clone_model_state(model)
     train_metrics = compute_losses(model, train_loader, c, device)
@@ -506,11 +334,6 @@ def run_all_experiments(config=None):
     X = X.float()
     maps = maps.float()
     dim = X.shape[1]
-    displacement_center = None
-    displacement_pc_component = None
-    displacement_pc_variance = None
-    whitening_matrix = None
-    unwhitening_matrix = None
 
     # Build atom grid Y
     grid_mode = config.get("grid_mode", "cloud_mixture")
@@ -532,9 +355,6 @@ def run_all_experiments(config=None):
         maps, batch_size=config["batch_size"],
         test_fraction=config["test_fraction"], seed=config["seed"],
     )
-    raw_train_loader, raw_test_loader = train_loader, test_loader
-    whitened_train_loader = None
-    whitened_test_loader = None
 
     all_results = []
     experiments = list(product(config["methods"], config["epsilons"],
@@ -555,99 +375,11 @@ def run_all_experiments(config=None):
             model_cls = TransportMapSAE
         elif method == "displacement":
             model_cls = DisplacementFieldSAE
-        elif method == "displacement_centered":
-            model_cls = CenteredDisplacementFieldSAE
-            if displacement_center is None:
-                displacement_center = load_displacement_center(
-                    config["data_dir"], X, maps,
-                    mode=config.get("displacement_center_mode", "generator_mean"),
-                ).float()
-                center_norm = float(displacement_center.pow(2).sum().sqrt())
-                print(
-                    f"  Displacement center: mode="
-                    f"{config.get('displacement_center_mode', 'generator_mean')} "
-                    f"norm={center_norm:.4f}",
-                    flush=True,
-                )
-        elif method == "displacement_centered_pc_removed":
-            model_cls = PCRemovedCenteredDisplacementFieldSAE
-            if displacement_center is None:
-                displacement_center = load_displacement_center(
-                    config["data_dir"], X, maps,
-                    mode=config.get("displacement_center_mode", "generator_mean"),
-                ).float()
-                center_norm = float(displacement_center.pow(2).sum().sqrt())
-                print(
-                    f"  Displacement center: mode="
-                    f"{config.get('displacement_center_mode', 'generator_mean')} "
-                    f"norm={center_norm:.4f}",
-                    flush=True,
-                )
-            if displacement_pc_component is None:
-                displacement_pc_component, displacement_pc_variance = (
-                    load_displacement_pc_components(
-                        config["data_dir"], X, maps, displacement_center,
-                        mode=config.get("displacement_pc_mode", "dataset_pca"),
-                        pc_index=config.get("displacement_pc_index", 1),
-                        pc_count=config.get("displacement_pc_count", 1),
-                        max_samples=config.get("whitening_max_samples"),
-                        seed=config["seed"],
-                    )
-                )
-                print(
-                    f"  Removed displacement PC: mode="
-                    f"{config.get('displacement_pc_mode', 'dataset_pca')} "
-                    f"start={config.get('displacement_pc_index', 1)} "
-                    f"count={config.get('displacement_pc_count', 1)} "
-                    f"variances={displacement_pc_variance}",
-                    flush=True,
-                )
-        elif method == "displacement_centered_whitened":
-            model_cls = WhitenedCenteredDisplacementFieldSAE
-            if displacement_center is None:
-                displacement_center = load_displacement_center(
-                    config["data_dir"], X, maps,
-                    mode=config.get("displacement_center_mode", "generator_mean"),
-                ).float()
-                center_norm = float(displacement_center.pow(2).sum().sqrt())
-                print(
-                    f"  Displacement center: mode="
-                    f"{config.get('displacement_center_mode', 'generator_mean')} "
-                    f"norm={center_norm:.4f}",
-                    flush=True,
-                )
-            if whitening_matrix is None or unwhitening_matrix is None:
-                whitening_matrix, unwhitening_matrix = load_displacement_whitening(
-                    config["data_dir"], X, maps, displacement_center,
-                    mode=config.get("whitening_mode", "dataset_zca"),
-                    eps=config.get("whitening_eps", 1e-4),
-                    max_samples=config.get("whitening_max_samples"),
-                    seed=config["seed"],
-                )
-                cond_proxy = float(torch.linalg.cond(unwhitening_matrix.double()))
-                print(
-                    f"  Whitening: mode={config.get('whitening_mode', 'dataset_zca')} "
-                    f"eps={config.get('whitening_eps', 1e-4):g} "
-                    f"max_samples={config.get('whitening_max_samples')} "
-                    f"unwhiten_cond~{cond_proxy:.3g}",
-                    flush=True,
-                )
-            if whitened_train_loader is None or whitened_test_loader is None:
-                print("  Precomputing whitened dataset residuals...", flush=True)
-                whitened_maps = precompute_whitened_residuals(
-                    maps, X, displacement_center, whitening_matrix,
-                    batch_size=max(int(config["batch_size"]), 1024),
-                )
-                whitened_train_loader, whitened_test_loader = make_dataloaders(
-                    maps, batch_size=config["batch_size"],
-                    test_fraction=config["test_fraction"], seed=config["seed"],
-                    aux_maps=whitened_maps,
-                )
         else:
             raise ValueError(f"Unknown method: {method}")
 
-        model_kwargs = dict(
-            m=config["m"], eps=eps,
+        model = model_cls(
+            X, m=config["m"], eps=eps,
             grid_side=config["grid_side"],
             lista_steps=config["lista_steps"],
             grid_points=grid_points,
@@ -656,50 +388,12 @@ def run_all_experiments(config=None):
             lateral_init="damped_identity",
             activation_type=config["activation_type"],
             topk_k=config["topk_k"],
-            softtopk_tau=(config["softtopk_tau_start"]
-                          if config.get("softtopk_tau_start") is not None
-                          else config["softtopk_tau"]),
-        )
-        model_seed = config.get("model_seed")
-        if model_seed is not None:
-            model_seed = int(model_seed)
-            print(f"  Model init seed: {model_seed}", flush=True)
-            torch.manual_seed(model_seed)
-            if torch.cuda.is_available():
-                torch.cuda.manual_seed_all(model_seed)
-        if method == "displacement_centered":
-            model = model_cls(X, displacement_center, **model_kwargs).to(device)
-        elif method == "displacement_centered_pc_removed":
-            model = model_cls(
-                X, displacement_center, displacement_pc_component,
-                **model_kwargs,
-            ).to(device)
-        elif method == "displacement_centered_whitened":
-            model = model_cls(
-                X, displacement_center, whitening_matrix, unwhitening_matrix,
-                **model_kwargs,
-            ).to(device)
-        else:
-            model = model_cls(X, **model_kwargs).to(device)
-
-        init_checkpoint = config.get("init_checkpoint")
-        if init_checkpoint:
-            init_checkpoint = Path(init_checkpoint)
-            ckpt = torch.load(init_checkpoint, map_location=device)
-            state = ckpt["model_state"] if "model_state" in ckpt else ckpt
-            model.load_state_dict(state)
-            print(f"  Loaded init checkpoint: {init_checkpoint}", flush=True)
+        ).to(device)
 
         run_config = dict(config, sparsity_coeff=c, name=run_name)
-        if method == "displacement_centered_whitened":
-            active_train_loader = whitened_train_loader
-            active_test_loader = whitened_test_loader
-        else:
-            active_train_loader = raw_train_loader
-            active_test_loader = raw_test_loader
 
         t0 = time.time()
-        train_result = train_one_model(model, active_train_loader, active_test_loader,
+        train_result = train_one_model(model, train_loader, test_loader,
                                        run_config, device)
         elapsed = time.time() - t0
         metrics = train_result["final_metrics"]
@@ -714,20 +408,6 @@ def run_all_experiments(config=None):
             "epochs": config["epochs"],
             "lr": config["lr"],
             "grad_clip_norm": config.get("grad_clip_norm"),
-            "sparsity_warmup": config.get("sparsity_warmup"),
-            "model_seed": config.get("model_seed"),
-            "init_checkpoint": config.get("init_checkpoint"),
-            "softtopk_tau_start": config.get("softtopk_tau_start"),
-            "softtopk_tau_end": config.get("softtopk_tau_end"),
-            "softtopk_tau_anneal_epochs": config.get("softtopk_tau_anneal_epochs"),
-            "displacement_center_mode": config.get("displacement_center_mode"),
-            "displacement_pc_mode": config.get("displacement_pc_mode"),
-            "displacement_pc_index": config.get("displacement_pc_index"),
-            "displacement_pc_count": config.get("displacement_pc_count"),
-            "displacement_pc_variance": displacement_pc_variance,
-            "whitening_mode": config.get("whitening_mode"),
-            "whitening_eps": config.get("whitening_eps"),
-            "whitening_max_samples": config.get("whitening_max_samples"),
             "elapsed_seconds": round(elapsed, 1),
             "best_epoch": train_result["best_epoch"],
             "best_epoch_loss": train_result["best_epoch_loss"],
@@ -766,29 +446,6 @@ def run_all_experiments(config=None):
             "grid_points": grid_points,
             "X": X,
         }
-        if method in (
-            "displacement_centered",
-            "displacement_centered_pc_removed",
-            "displacement_centered_whitened",
-        ):
-            common_ckpt["displacement_center"] = displacement_center
-            common_ckpt["displacement_center_mode"] = config.get(
-                "displacement_center_mode", "generator_mean",
-            )
-        if method == "displacement_centered_pc_removed":
-            common_ckpt["displacement_pc_component"] = displacement_pc_component
-            common_ckpt["displacement_pc_mode"] = config.get(
-                "displacement_pc_mode", "dataset_pca",
-            )
-            common_ckpt["displacement_pc_index"] = config.get("displacement_pc_index", 1)
-            common_ckpt["displacement_pc_count"] = config.get("displacement_pc_count", 1)
-            common_ckpt["displacement_pc_variance"] = displacement_pc_variance
-        if method == "displacement_centered_whitened":
-            common_ckpt["whitening_matrix"] = whitening_matrix
-            common_ckpt["unwhitening_matrix"] = unwhitening_matrix
-            common_ckpt["whitening_mode"] = config.get("whitening_mode", "dataset_zca")
-            common_ckpt["whitening_eps"] = config.get("whitening_eps", 1e-4)
-            common_ckpt["whitening_max_samples"] = config.get("whitening_max_samples")
         torch.save({
             **common_ckpt,
             "model_state": train_result["final_state"],
@@ -840,33 +497,7 @@ if __name__ == "__main__":
                         default=DEFAULT_CONFIG["epsilons"])
     parser.add_argument("--methods", type=str, nargs="+",
                         default=DEFAULT_CONFIG["methods"],
-                        choices=["raw_map", "displacement", "displacement_centered",
-                                 "displacement_centered_pc_removed",
-                                 "displacement_centered_whitened"])
-    parser.add_argument("--displacement_center_mode", type=str,
-                        default=DEFAULT_CONFIG["displacement_center_mode"],
-                        choices=["generator_mean", "dataset_mean", "none"],
-                        help="Fixed residual baseline for displacement_centered runs.")
-    parser.add_argument("--displacement_pc_index", type=int,
-                        default=DEFAULT_CONFIG["displacement_pc_index"],
-                        help="Zero-based PCA component index to remove after centering.")
-    parser.add_argument("--displacement_pc_count", type=int,
-                        default=DEFAULT_CONFIG["displacement_pc_count"],
-                        help="Number of consecutive PCA components to remove.")
-    parser.add_argument("--displacement_pc_mode", type=str,
-                        default=DEFAULT_CONFIG["displacement_pc_mode"],
-                        choices=["dataset_pca", "generator_pca"],
-                        help="Residual source used to estimate removed PC.")
-    parser.add_argument("--whitening_mode", type=str,
-                        default=DEFAULT_CONFIG["whitening_mode"],
-                        choices=["dataset_zca", "generator_zca", "none"],
-                        help="Whitening source for displacement_centered_whitened runs.")
-    parser.add_argument("--whitening_eps", type=float,
-                        default=DEFAULT_CONFIG["whitening_eps"],
-                        help="Diagonal regularizer added before inverse sqrt whitening.")
-    parser.add_argument("--whitening_max_samples", type=int,
-                        default=DEFAULT_CONFIG["whitening_max_samples"],
-                        help="Optional cap on residual samples used to estimate whitening.")
+                        choices=["raw_map", "displacement"])
     parser.add_argument("--device", type=str, default=DEFAULT_CONFIG["device"],
                         choices=["auto", "cuda", "mps", "cpu"])
     parser.add_argument("--gpu_ids", type=int, nargs="*", default=None)
@@ -882,15 +513,6 @@ if __name__ == "__main__":
     parser.add_argument("--grad_clip_norm", type=float,
                         default=DEFAULT_CONFIG["grad_clip_norm"],
                         help="If >0, clip gradient norm to this value after backward.")
-    parser.add_argument("--sparsity_warmup", type=int,
-                        default=DEFAULT_CONFIG["sparsity_warmup"],
-                        help="Linearly ramp L1 coefficient over this many epochs.")
-    parser.add_argument("--init_checkpoint", type=str,
-                        default=DEFAULT_CONFIG["init_checkpoint"],
-                        help="Optional checkpoint whose model_state initializes each run.")
-    parser.add_argument("--model_seed", type=int,
-                        default=DEFAULT_CONFIG["model_seed"],
-                        help="Optional torch seed applied immediately before model init.")
     parser.add_argument("--seed", type=int, default=DEFAULT_CONFIG["seed"])
     parser.add_argument("--classes", type=str, nargs="*", default=None)
     parser.add_argument("--test_fraction", type=float,
@@ -901,18 +523,8 @@ if __name__ == "__main__":
                         choices=["adamw", "adam"])
     parser.add_argument("--activation_type", type=str,
                         default=DEFAULT_CONFIG["activation_type"],
-                        choices=["relu", "jumprelu", "final_jumprelu", "topk",
-                                 "topk_simplex", "softtopk", "final_softtopk",
-                                 "final_softtopk_simplex"])
+                        choices=["relu", "jumprelu", "topk", "topk_simplex"])
     parser.add_argument("--topk_k", type=int, default=DEFAULT_CONFIG["topk_k"])
-    parser.add_argument("--softtopk_tau", type=float,
-                        default=DEFAULT_CONFIG["softtopk_tau"])
-    parser.add_argument("--softtopk_tau_start", type=float,
-                        default=DEFAULT_CONFIG["softtopk_tau_start"])
-    parser.add_argument("--softtopk_tau_end", type=float,
-                        default=DEFAULT_CONFIG["softtopk_tau_end"])
-    parser.add_argument("--softtopk_tau_anneal_epochs", type=int,
-                        default=DEFAULT_CONFIG["softtopk_tau_anneal_epochs"])
 
     args = parser.parse_args()
 
