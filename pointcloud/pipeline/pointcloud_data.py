@@ -132,8 +132,7 @@ def load_raw_clouds(data_dir, classes=None):
 
     These are the pre-OT ground-truth measures sampled from each shape (saved as
     class_<name>/raw_clouds.pt by prepare_pointcloud_ot.py).  They are used as
-    the common target for native Wasserstein / Chamfer reconstruction scoring
-    and as the direct input to point-cloud baselines (e.g. the PointNet AE).
+    the common target for native Wasserstein / Chamfer reconstruction scoring.
 
     Returns:
         raw_clouds: (N, cloud_supp_size, 3) tensor, aligned row-for-row with the

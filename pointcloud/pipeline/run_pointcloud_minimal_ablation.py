@@ -323,11 +323,6 @@ def main():
                         help="MiniBatchDictionaryLearning max_iter.")
     parser.add_argument("--skip_lwdl", action="store_true",
                         help="Skip the LWDL row (e.g. if no checkpoint yet).")
-    parser.add_argument("--include_pointnet", action="store_true",
-                        help="Also run the raw-cloud PointNet AE baseline "
-                             "(dense + L1). Requires a trained model each run.")
-    parser.add_argument("--pointnet_epochs", type=int, default=150)
-    parser.add_argument("--pointnet_lr", type=float, default=1e-3)
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)
@@ -352,8 +347,7 @@ def main():
     if raw_clouds is None:
         print("  WARNING: raw target clouds unavailable; falling back to the OT "
               "maps T_i as the Wasserstein/Chamfer target (regenerate the "
-              "dataset with the updated prepare script for the mu_i yardstick). "
-              "PointNet, if requested, will also train on T_i.")
+              "dataset with the updated prepare script for the mu_i yardstick).")
         wass_source = maps
         wass_target_kind = "ot_map_Ti"
     else:
@@ -442,27 +436,6 @@ def main():
             **lot_l2_kwargs, **metric_kwargs))
     else:
         print("\n=== LWDL-EOT skipped (--skip_lwdl) ===")
-
-    # ---- PointNet AE (raw-cloud, no OT), dense -----------------------------
-    if args.include_pointnet:
-        from pointcloud.pipeline.pointcloud_pointnet_baseline import (
-            run_pointnet_baseline,
-        )
-        print("\n=== PointNet-AE (dense) ===")
-        pn = run_pointnet_baseline(
-            wass_target_train, wass_target_test,   # raw clouds mu_i (or T_i fallback)
-            m=m, l1=0.0, epochs=args.pointnet_epochs, batch_size=args.batch_size,
-            lr=args.pointnet_lr, seed=args.seed, device=args.device)
-        # No point correspondence -> no map-space L2 (map_l2_ref left None).
-        rows.append(compute_metric_row(
-            "PointNet-AE",
-            train_codes=pn["train_codes"], test_codes=pn["test_codes"],
-            train_recon=pn["train_recon_clouds"],
-            test_recon=pn["test_recon_clouds"],
-            runtime=pn["runtime_seconds"], dense_code=True,
-            mean_l0_override=pn["n_components"],
-            extra={"n_components": pn["n_components"], "input": wass_target_kind},
-            **metric_kwargs))
 
     # ---- Persist ----------------------------------------------------------
     meta = {

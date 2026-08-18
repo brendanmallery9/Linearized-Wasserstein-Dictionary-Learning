@@ -6,7 +6,7 @@
 # (datasets/, pointcloud/results/, and pointcloud_raw/ are all gitignored).  So
 # this script is self-contained: it (1) prepares the point-cloud OT dataset with
 # raw clouds, (2) trains the LWDL-EOT model on the GPU, and (3) runs the
-# PCA / sparse-coding / LWDL / PointNet ablation on the GPU.  Steps that already
+# PCA / sparse-coding / LWDL ablation on the GPU.  Steps that already
 # have their outputs on disk are skipped, so re-runs are cheap.
 #
 # Usage:
@@ -72,12 +72,12 @@ else
   echo ">>> [2/3] LWDL checkpoint already present ($LWDL_DIR); skipping training."
 fi
 
-# 3. Run the ablation (PCA / sparse coding / LWDL / PointNet) on the GPU.
+# 3. Run the ablation (PCA / sparse coding / LWDL) on the GPU.
 echo ">>> [3/3] Running ablation -> $OUT_DIR"
 "$PYTHON" -u pointcloud/pipeline/run_pointcloud_minimal_ablation.py \
   --data_dir "$DATA_DIR" --lwdl_results_dir "$LWDL_DIR" \
   --output_dir "$OUT_DIR" --m "$M" --seed "$SEED" \
-  --include_pointnet --device "$DEVICE"
+  --device "$DEVICE"
 
 echo ""
 echo "Done. Table:"

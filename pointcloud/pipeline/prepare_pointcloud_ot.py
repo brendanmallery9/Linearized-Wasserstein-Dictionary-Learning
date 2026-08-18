@@ -472,9 +472,8 @@ def main():
 
         # Also persist the raw target clouds (mu_i) that generated these maps,
         # in the SAME order as `mappings`.  These are the pre-OT ground-truth
-        # measures; downstream baselines that work directly on point clouds
-        # (e.g. the PointNet autoencoder) and the native Wasserstein
-        # reconstruction metric use them instead of the transported base points.
+        # measures used by the native Wasserstein reconstruction metric instead
+        # of the transported base points.
         raw_clouds = torch.stack([
             torch.as_tensor(p, dtype=torch.float32) for p in clouds[:len(maps_list)]
         ])  # (N_cls, cloud_supp_size, 3)

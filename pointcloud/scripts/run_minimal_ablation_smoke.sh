@@ -29,7 +29,6 @@ M="${M:-5}"
 MAX_SAMPLES="${MAX_SAMPLES:-120}"
 MAX_WASS="${MAX_WASS:-20}"
 SPARSE_MAX_ITER="${SPARSE_MAX_ITER:-30}"
-POINTNET_EPOCHS="${POINTNET_EPOCHS:-20}"
 
 echo "=== minimal ablation smoke ==="
 echo "data_dir:         $DATA_DIR"
@@ -46,8 +45,6 @@ echo ""
   --max_samples "$MAX_SAMPLES" \
   --max_wasserstein_samples "$MAX_WASS" \
   --sparse_max_iter "$SPARSE_MAX_ITER" \
-  --include_pointnet \
-  --pointnet_epochs "$POINTNET_EPOCHS" \
   --device "$DEVICE"
 
 echo ""
