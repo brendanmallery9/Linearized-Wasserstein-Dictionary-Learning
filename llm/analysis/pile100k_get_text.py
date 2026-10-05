@@ -26,6 +26,8 @@ import os
 import re
 import json
 import argparse
+import gc
+import sys
 import torch
 from pathlib import Path
 from datasets import load_dataset
@@ -90,6 +92,11 @@ def main():
     # Step 2: load dataset with identical settings
     print(f"Loading dataset: {args.dataset} (split={args.split}, "
           f"streaming={args.streaming}, shuffle={args.shuffle})")
+    if args.streaming:
+        # Avoid PyArrow's global thread-pool shutdown deadlock when a Parquet
+        # streaming iterator is stopped before exhausting the remote shard.
+        import pyarrow as pa
+        pa.set_cpu_count(1)
     ds = load_dataset(args.dataset, split=args.split, streaming=args.streaming)
 
     if args.shuffle:
@@ -144,6 +151,8 @@ def main():
             print(f"[{doc_index}] Saved {out_path.name} "
                   f"(saved={saved}, skipped={skipped}, already={already})")
 
+    del ds
+    gc.collect()
     remaining = needed - {i for i in range(doc_index + 1) if i in needed}
     print(f"\nDone. saved={saved}, skipped_not_needed={skipped}, "
           f"already_existed={already}")
@@ -153,6 +162,11 @@ def main():
               f"don't match what was used during embedding.")
     else:
         print("All doc_indices matched — text files are complete.")
+
+    if args.streaming:
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(0)
 
 
 if __name__ == "__main__":

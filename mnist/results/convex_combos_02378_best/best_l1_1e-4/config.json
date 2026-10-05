@@ -1,0 +1,45 @@
+{
+  "data_dir": "datasets/convex_combos_02378",
+  "classes": null,
+  "test_fraction": 0.1,
+  "seed": 42,
+  "m": 5,
+  "grid_side": 64,
+  "grid_mode": "uniform",
+  "grid_n_clouds": 10,
+  "grid_support_size": 1000,
+  "lista_steps": 20,
+  "activation_type": "relu",
+  "topk_k": 2,
+  "softtopk_tau": 0.1,
+  "softtopk_tau_start": null,
+  "softtopk_tau_end": null,
+  "softtopk_tau_anneal_epochs": null,
+  "batch_size": 1024,
+  "epochs": 1000,
+  "lr": 0.00015,
+  "optimizer": "adamw",
+  "weight_decay": 0.0,
+  "scheduler": "cosine",
+  "lr_min": 5e-06,
+  "grad_clip_norm": 1.0,
+  "epsilons": [
+    0.025
+  ],
+  "sparsity_coeffs": [
+    0.0001
+  ],
+  "methods": [
+    "displacement_centered"
+  ],
+  "displacement_center_mode": "generator_mean",
+  "displacement_pc_index": 1,
+  "displacement_pc_count": 1,
+  "displacement_pc_mode": "dataset_pca",
+  "whitening_mode": "dataset_zca",
+  "whitening_eps": 0.0001,
+  "whitening_max_samples": null,
+  "output_dir": "mnist/results/convex_combos_02378_best/best_l1_1e-4",
+  "device": "auto",
+  "gpu_ids": null
+}

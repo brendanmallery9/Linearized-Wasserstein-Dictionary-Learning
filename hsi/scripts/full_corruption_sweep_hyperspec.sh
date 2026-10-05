@@ -7,7 +7,8 @@
 #     - NMF             (baseline; always run automatically by inner script)
 #
 #   Corruption types:  drop_random, drop_contiguous, log_warp
-#   Severities:        k = 0.1, 0.2, 0.3, 0.4, 0.5
+#   Dropout severities: k = 0.1, 0.2, 0.3, 0.4, 0.5
+#   Log-warp severities: k = 1, 10, 100, 500, 1000
 #   Corruption seeds:  0 – 4
 #   Training seeds:    0 – 4
 #
@@ -30,22 +31,40 @@ WRAPPER="$PIPELINE_DIR/corruption_sweep_wrapper.py"
 ROOT="${ROOT:-datasets/hsi_data}"
 SAE_MODE="${SAE_MODE:-both}"
 RESULTS_DIR="${RESULTS_DIR:-$SCRIPT_DIR/../results}"
+DATASETS="${DATASETS:-pavia botswana salinas_a}"
+SEEDS="${SEEDS:-0 1 2 3 4}"
+CORRUPTION_SEEDS="${CORRUPTION_SEEDS:-0 1 2 3 4}"
+DROP_K_VALUES="${DROP_K_VALUES:-0.1 0.2 0.3 0.4 0.5}"
+LOG_WARP_K_VALUES="${LOG_WARP_K_VALUES:-1 10 100 500 1000}"
 
 usage() {
     cat <<'EOF'
 Usage:
-  hsi/scripts/full_corruption_sweep_hyperspec.sh [--root PATH] [--sae-mode MODE] [--results-dir PATH]
+  hsi/scripts/full_corruption_sweep_hyperspec.sh [options]
 
 Options:
   --root PATH          Hyperspectral dataset root. Default: datasets/hsi_data
   --sae-mode MODE      transport_maps, linear, or both. Default: both
   --results-dir PATH   Directory for JSONs, tables, and slot logs. Default: hsi/results
+  --datasets "NAMES"   Space-separated dataset directories. Default: "pavia botswana salinas_a"
+  --seeds "N ..."      Space-separated SAE training seeds. Default: "0 1 2 3 4"
+  --corruption-seeds "N ..."
+                       Space-separated corruption RNG seeds. Default: "0 1 2 3 4"
+  --drop-k-values "K ..."
+                       Dropout severities. Default: "0.1 0.2 0.3 0.4 0.5"
+  --log-warp-k-values "K ..."
+                       Log-warp severities. Default: "1 10 100 500 1000"
   -h, --help           Show this help
 
 Environment overrides:
   ROOT=datasets/hsi_data
   SAE_MODE=both
   RESULTS_DIR=hsi/results
+  DATASETS="pavia botswana salinas_a"
+  SEEDS="0 1 2 3 4"
+  CORRUPTION_SEEDS="0 1 2 3 4"
+  DROP_K_VALUES="0.1 0.2 0.3 0.4 0.5"
+  LOG_WARP_K_VALUES="1 10 100 500 1000"
 EOF
 }
 
@@ -61,6 +80,26 @@ while [[ $# -gt 0 ]]; do
             ;;
         --results-dir)
             RESULTS_DIR="$2"
+            shift 2
+            ;;
+        --datasets)
+            DATASETS="$2"
+            shift 2
+            ;;
+        --seeds)
+            SEEDS="$2"
+            shift 2
+            ;;
+        --corruption-seeds)
+            CORRUPTION_SEEDS="$2"
+            shift 2
+            ;;
+        --drop-k-values)
+            DROP_K_VALUES="$2"
+            shift 2
+            ;;
+        --log-warp-k-values)
+            LOG_WARP_K_VALUES="$2"
             shift 2
             ;;
         -h|--help)
@@ -115,18 +154,21 @@ echo "$DEVICE_INFO" | tail -n +2
 echo ""
 echo "Root: $ROOT"
 echo "SAE mode: $SAE_MODE"
+echo "Datasets: $DATASETS"
+echo "Training seeds: $SEEDS"
+echo "Corruption seeds: $CORRUPTION_SEEDS"
 mkdir -p "$RESULTS_DIR"
 RESULTS_DIR="$(cd "$RESULTS_DIR" && pwd)"
 echo "Results dir: $RESULTS_DIR"
 echo ""
 
 # ---------------------------------------------------------------------------
-# key_pairs: transport_maps (mon) + linear (nonneg) for all four datasets
+# Paper key pairs: transport_maps (mon) + linear (nonneg) for the three
+# reported datasets.  Hidden dimension identifies the dataset here.
 #   NMF baseline is run automatically by the inner clustering script.
 #
 #   Botswana      → hidden_dim 15
 #   Pavia         → hidden_dim 10
-#   Indian Pines  → hidden_dim 17
 #   Salinas_A     → hidden_dim  7
 # ---------------------------------------------------------------------------
 TRANSPORT_MAP_KEY_PAIRS=(
@@ -135,30 +177,18 @@ TRANSPORT_MAP_KEY_PAIRS=(
     transport_maps JUMPRELUAE_15_5e-1_mon
     transport_maps JUMPRELUAE_10_5e-1_mon
     transport_maps JUMPRELUAE_10_1e-2_mon
-    transport_maps JUMPRELUAE_17_1e-5_mon
-    transport_maps JUMPRELUAE_17_1e-3_mon
     transport_maps JUMPRELUAE_7_1e-5_mon
     transport_maps JUMPRELUAE_7_1e-3_mon
 )
 
 LINEAR_KEY_PAIRS=(
     # --- linear (raw cube) ---
-    linear JUMPRELUAE_15_1e-1_nonneg
-    linear JUMPRELUAE_15_5e-1_nonneg
     linear JUMPRELUAE_15_1e-3_nonneg
     linear JUMPRELUAE_15_1e-5_nonneg
-    linear JUMPRELUAE_10_5e-1_nonneg
-    linear JUMPRELUAE_10_1e-2_nonneg
     linear JUMPRELUAE_10_1e-3_nonneg
     linear JUMPRELUAE_10_1e-4_nonneg
-    linear JUMPRELUAE_17_1e-3_nonneg
-    linear JUMPRELUAE_17_1e-5_nonneg
-    linear JUMPRELUAE_17_1e-2_nonneg
-    linear JUMPRELUAE_17_1e-1_nonneg
     linear JUMPRELUAE_7_1e-3_nonneg
     linear JUMPRELUAE_7_1e-5_nonneg
-    linear JUMPRELUAE_7_1e-2_nonneg
-    linear JUMPRELUAE_7_1e-1_nonneg
 )
 
 KEY_PAIRS=()
@@ -176,9 +206,9 @@ esac
 
 COMMON_ARGS=(
     --root "$ROOT"
-    --k_values 0.1 0.2 0.3 0.4 0.5
-    --corruption_seeds 0 1 2 3 4
-    --seeds 0 1 2 3 4
+    --datasets $DATASETS
+    --corruption_seeds $CORRUPTION_SEEDS
+    --seeds $SEEDS
     --key_pairs "${KEY_PAIRS[@]}"
 )
 
@@ -221,7 +251,12 @@ for slot in $(seq 0 $(( N_SLOTS - 1 ))); do
 
         for ctype in "${types[@]}"; do
             echo "[$label] Starting $ctype sweep"
-            python -u "$WRAPPER" "${COMMON_ARGS[@]}" \
+            if [[ "$ctype" == "log_warp" ]]; then
+                k_values=( $LOG_WARP_K_VALUES )
+            else
+                k_values=( $DROP_K_VALUES )
+            fi
+            python -u "$WRAPPER" "${COMMON_ARGS[@]}" --k_values "${k_values[@]}" \
                 --corruption_type "$ctype" \
                 --output "$RESULTS_DIR/${ctype}.json"
             echo "[$label] $ctype done"

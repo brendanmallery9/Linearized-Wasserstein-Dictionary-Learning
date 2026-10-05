@@ -1,0 +1,32 @@
+[
+  {
+    "method": "displacement_centered",
+    "epsilon": 0.025,
+    "sparsity_coeff": 0.0001,
+    "device": "mps",
+    "m": 5,
+    "model_seed": 0,
+    "epochs": 1000,
+    "lr": 0.00015,
+    "grad_clip_norm": 1.0,
+    "elapsed_seconds": 1475.6,
+    "best_epoch": 862,
+    "best_epoch_loss": 0.0005006536112149369,
+    "best_train_recon_loss": 0.00045890000683289985,
+    "best_train_total_loss": 0.0005008039339930923,
+    "best_train_mean_l1": 0.41903927160192417,
+    "best_train_mean_active": 3.0279814814814814,
+    "best_test_recon_loss": 0.0004611102392276128,
+    "best_test_total_loss": 0.000503229706899325,
+    "best_test_mean_l1": 0.4211946767171224,
+    "best_test_mean_active": 3.029,
+    "train_recon_loss": 0.00045889698796802096,
+    "train_total_loss": 0.0005008009620913752,
+    "train_mean_l1": 0.4190397412335431,
+    "train_mean_active": 3.0274814814814817,
+    "test_recon_loss": 0.00046110770603020987,
+    "test_total_loss": 0.0005032279890298843,
+    "test_mean_l1": 0.4212028299967448,
+    "test_mean_active": 3.0286666666666666
+  }
+]

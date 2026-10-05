@@ -19,6 +19,9 @@ SAE_PARAMETERS = {
     'JUMPRELUAE_10':   {'architecture': 'JumpReLU', 'l1': '1e-3', 'hidden_dim': 10,  'top_K': 0, 'normalize': False},
     'JUMPRELUAE_40':   {'architecture': 'JumpReLU', 'l1': '1e-3', 'hidden_dim': 40,  'top_K': 0, 'normalize': False},
     'JUMPRELUAE_512':  {'architecture': 'JumpReLU', 'l1': '1e-1', 'hidden_dim': 512, 'top_K': 0, 'normalize': True},
+    # Paper Pile-100k checkpoint: the retained args.txt records unnormalized
+    # inputs, l1=1e-1, 3,000 epochs, and lr=5e-4.
+    'JUMPRELUAE_512_1e-1': {'architecture': 'JumpReLU', 'l1': '1e-1', 'hidden_dim': 512, 'top_K': 0, 'normalize': False},
 }
 
 SAE_SCRIPT = str(REPO_ROOT / "SAE.py")
@@ -47,6 +50,8 @@ def parse_args():
                    help="Path to validation data directory (optional)")
     p.add_argument("--val_frequency",    type=float, default=0.2,
                    help="Fraction of epochs between validation runs (default: 0.2)")
+    p.add_argument("--trials", nargs="+", choices=sorted(SAE_PARAMETERS), default=None,
+                   help="SAE trial names to train (default: all configured trials)")
     return p.parse_args()
 
 
@@ -92,7 +97,9 @@ def main():
     torch.save(stacked_tensor, stack_path)
     print(f"Saved stacked tensor -> {stack_path}")
 
-    for trial_name, params in SAE_PARAMETERS.items():
+    trial_names = args.trials if args.trials is not None else list(SAE_PARAMETERS)
+    for trial_name in trial_names:
+        params = SAE_PARAMETERS[trial_name]
         l1 = params["l1"]
         architecture = params["architecture"]
         hidden_dim = params["hidden_dim"]

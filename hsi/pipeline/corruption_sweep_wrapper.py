@@ -55,7 +55,8 @@ from collections import defaultdict
 
 
 def run_one(script, root, corruption_type, k, corruption_seeds, seeds,
-            sae_mode="transport_maps", keys=None, batch_size=1024, extra_args=None):
+            sae_mode="transport_maps", keys=None, datasets=None, batch_size=1024,
+            extra_args=None):
     """Run the inner script once and return its JSON output.
 
     If k is None, no corruption is applied (baseline run).
@@ -82,6 +83,8 @@ def run_one(script, root, corruption_type, k, corruption_seeds, seeds,
 
     if keys:
         cmd += ["--keys", *keys]
+    if datasets:
+        cmd += ["--datasets", *datasets]
     if extra_args:
         cmd += extra_args
 
@@ -229,6 +232,8 @@ def main():
                         help="Corruption RNG seeds to sweep (default: 0 1 2 3 4)")
     parser.add_argument("--seeds", type=int, nargs="+", default=[0, 1, 2, 3, 4],
                         help="SAE training seeds (passed through to inner script)")
+    parser.add_argument("--datasets", type=str, nargs="+", default=None,
+                        help="Dataset subdirectories to evaluate (default: discover all)")
     parser.add_argument("--key_pairs", type=str, nargs="+", default=None,
                         help="Pairs of (sae_mode, key), e.g.: "
                              "transport_maps JUMPRELUAE_15_1e-1_mon "
@@ -316,6 +321,7 @@ def main():
             seeds=args.seeds,
             sae_mode=mode,
             keys=keys,
+            datasets=args.datasets,
             batch_size=args.batch_size,
             extra_args=args.extra_args,
         )
@@ -344,6 +350,7 @@ def main():
         "sweep_config": {
             "script": args.script,
             "root": args.root,
+            "datasets": args.datasets,
             "corruption_type": args.corruption_type,
             "k_values": args.k_values,
             "corruption_seeds": args.corruption_seeds,

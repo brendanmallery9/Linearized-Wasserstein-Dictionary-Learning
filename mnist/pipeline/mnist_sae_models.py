@@ -45,6 +45,36 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
+# These buffers are determined entirely by the source support and target grid
+# passed to a model constructor.  Submission checkpoints omit them to avoid
+# storing the same geometry (especially the n-by-K cost matrix) twice.
+RECOMPUTED_STATE_KEYS = frozenset({
+    "X",
+    "displacement_center",
+    "atoms_module.X",
+    "atoms_module.Y",
+    "atoms_module.cost",
+})
+
+
+def load_model_state(model, state_dict):
+    """Load a full or compact checkpoint, rejecting non-geometry mismatches.
+
+    Compact checkpoints may omit only buffers that the model constructor has
+    already reconstructed from checkpoint metadata or the prepared dataset.
+    Learned parameters and every other state entry remain strictly checked.
+    """
+    result = model.load_state_dict(state_dict, strict=False)
+    invalid_missing = sorted(set(result.missing_keys) - RECOMPUTED_STATE_KEYS)
+    if invalid_missing or result.unexpected_keys:
+        raise RuntimeError(
+            "Checkpoint state mismatch: "
+            f"missing={invalid_missing}, "
+            f"unexpected={list(result.unexpected_keys)}"
+        )
+    return result
+
+
 def make_grid_2d(grid_side=32):
     """
     Create a uniform 2D grid on [0,1]^2.
@@ -574,3 +604,60 @@ class DisplacementFieldSAE(nn.Module):
         lam = self.encode(V, V_atoms_enc)                                    # (B, m)
         T_hat = self.decode(lam, V_atoms)                                    # (B, n, 2)
         return T_hat, lam
+
+
+class CenteredDisplacementFieldSAE(nn.Module):
+    """Backward-compatible centered displacement model used by older notebooks."""
+
+    def __init__(self, X, displacement_center, m, eps, grid_side=32,
+                 lista_steps=1, activation_type="relu", normalize_atoms=False,
+                 grid_points=None, atoms_type="gibbs", n_sinkhorn=30,
+                 topk_k=3, per_atom_gain=False, lateral_init="zeros",
+                 softtopk_tau=None):
+        super().__init__()
+        self.atoms_module = _build_atoms_module(
+            atoms_type, X, m, eps, grid_side, grid_points, n_sinkhorn,
+        )
+        self.encoder = LISTAEncoder(
+            m, lista_steps=lista_steps, activation_type=activation_type,
+            topk_k=topk_k, per_atom_gain=per_atom_gain,
+            lateral_init=lateral_init,
+        )
+        self.n = X.shape[0]
+        self.m = m
+        self.normalize_atoms = normalize_atoms
+        self.register_buffer("X", X)
+        self.register_buffer("displacement_center", displacement_center)
+
+    def encode(self, V_centered, V_atoms_enc):
+        inner = torch.einsum("bnd, mnd -> bm", V_centered, V_atoms_enc) / self.n
+        return self.encoder(inner)
+
+    def decode(self, lam, V_atoms_centered):
+        V_hat_centered = torch.einsum(
+            "bm, mnd -> bnd", lam, V_atoms_centered,
+        )
+        return (
+            self.X.unsqueeze(0)
+            + self.displacement_center.unsqueeze(0)
+            + V_hat_centered
+        )
+
+    def forward(self, T):
+        atoms = self.atoms_module()
+        center = self.displacement_center.unsqueeze(0)
+        V_atoms = atoms - self.X.unsqueeze(0) - center
+        V_atoms_enc = (
+            normalize_atoms_l2rho(V_atoms, self.n)
+            if self.normalize_atoms else V_atoms
+        )
+        V = T - self.X.unsqueeze(0) - center
+        lam = self.encode(V, V_atoms_enc)
+        return self.decode(lam, V_atoms), lam
+
+
+# These historical names were imported eagerly by old analysis notebooks. They
+# are retained as aliases so those notebooks can load their active centered run;
+# current experiment code does not emit either legacy checkpoint method.
+PCRemovedCenteredDisplacementFieldSAE = CenteredDisplacementFieldSAE
+WhitenedCenteredDisplacementFieldSAE = CenteredDisplacementFieldSAE

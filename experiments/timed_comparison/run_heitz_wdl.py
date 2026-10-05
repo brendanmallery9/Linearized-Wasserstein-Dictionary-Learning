@@ -893,8 +893,21 @@ def build_binary(
     if not with_avx:
         apply_noavx_fallback(source_dir)
 
+    # Upstream includes x86 SSE headers even when AVX is disabled.  On Apple
+    # Silicon, build its scalar/no-AVX target as x86_64 and run it via Rosetta;
+    # a native arm64 compile otherwise fails in xmmintrin.h before reaching the
+    # scalar dot-product fallback.
+    architecture_args = []
+    if platform.system() == "Darwin" and platform.machine().lower() == "arm64":
+        architecture_args.append("-DCMAKE_OSX_ARCHITECTURES=x86_64")
+
     cmake_cmd = [
         "cmake",
+        # The pinned upstream project still declares cmake_minimum_required 2.8.
+        # CMake 4 removed compatibility below 3.5, but accepts this policy floor
+        # for legacy projects without changing their source checkout.
+        "-DCMAKE_POLICY_VERSION_MINIMUM=3.5",
+        *architecture_args,
         f"-DCMAKE_BUILD_TYPE={build_type}",
         f"-DWITH_OPENMP={'ON' if with_openmp else 'OFF'}",
         f"-DWITH_HALIDE={'ON' if with_halide else 'OFF'}",
@@ -953,6 +966,13 @@ def main() -> None:
     args = parse_args()
     run_dir = args.run_dir.resolve()
     run_dir.mkdir(parents=True, exist_ok=True)
+
+    if shutil.which("convert") is None and shutil.which("gm") is None:
+        raise RuntimeError(
+            "The pinned Heitz WDL code uses CImg's external PNG loader. "
+            "Install ImageMagick (`brew install imagemagick` on macOS) or "
+            "GraphicsMagick before running this baseline."
+        )
 
     source_dir = args.source_dir or (run_dir / "external" / "WassersteinDictionaryLearning")
     build_dir = args.build_dir or (run_dir / "build" / "heitz_wdl")

@@ -659,11 +659,13 @@ def apply_corruption(data, corruption_type, k, rng=None):
     data : np.ndarray, shape (N, M)
         Input spectra / codes.
     corruption_type : str
-        One of: "drop_random", "drop_contiguous", "shift_global", "shift_split".
+        One of: "drop_random", "drop_contiguous", "shift_global",
+        "shift_split", or "log_warp".
     k : float
-        Fraction in (0, 1].
+        Corruption level.
         - For drop corruptions: fraction of mass to remove per spectrum.
         - For shift corruptions: used directly as ``frac``.
+        - For ``log_warp``: positive warp parameter ``a``.
     rng : np.random.Generator, optional
 
     Returns
@@ -772,6 +774,8 @@ def main():
     )
     parser.add_argument("--root", required=True,
                         help="Root directory containing dataset subdirectories")
+    parser.add_argument("--datasets", nargs="+", default=None,
+                        help="Dataset subdirectories to evaluate (default: discover all under --root)")
     parser.add_argument("--seeds", type=int, nargs="+", default=[0, 1, 2, 3, 4],
                         help="Seed indices to iterate over (default: 0 1 2 3 4)")
     parser.add_argument("--batch_size", type=int, default=1024)
@@ -786,7 +790,8 @@ def main():
                     help="Specific SAE keys to use (default: all discovered keys)")
     parser.add_argument(
         "--corruption", type=str, nargs=2, default=None, metavar=("TYPE", "K"),
-        help="Corruption type and fraction k. Types: drop_random, drop_contiguous, shift_global, shift_split"
+        help="Corruption type and level k. Types: drop_random, drop_contiguous, "
+             "shift_global, shift_split, log_warp"
     )
     parser.add_argument("--corruption_seeds", type=int, nargs="+", default=[0],
                     help="RNG seed(s) for corruption (default: [0]). "
@@ -835,8 +840,18 @@ def main():
               f"corruption_seeds={corruption_seeds}")
 
     root = Path(args.root)
-    datasets = discover_datasets(root)
-    print(f"Discovered datasets: {datasets}")
+    discovered_datasets = discover_datasets(root)
+    if args.datasets is None:
+        datasets = discovered_datasets
+        print(f"Discovered datasets: {datasets}")
+    else:
+        missing_datasets = sorted(set(args.datasets) - set(discovered_datasets))
+        if missing_datasets:
+            raise FileNotFoundError(
+                f"Requested dataset directories not found under {root}: {missing_datasets}"
+            )
+        datasets = args.datasets
+        print(f"Selected datasets: {datasets}")
 
     # ---- Per-corruption-seed collectors ----
     # We collect results across ALL corruption seeds in this single process.

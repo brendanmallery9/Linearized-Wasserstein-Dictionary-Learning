@@ -1,0 +1,42 @@
+{
+  "data_dir": "datasets/modelnet10_6cls_ot",
+  "classes": [
+    "bed",
+    "chair",
+    "monitor",
+    "sofa",
+    "table",
+    "toilet"
+  ],
+  "test_fraction": 0.1,
+  "seed": 42,
+  "m": 30,
+  "grid_side": 17,
+  "grid_mode": "uniform",
+  "grid_n_clouds": 10,
+  "grid_support_size": 3000,
+  "lista_steps": 20,
+  "activation_type": "relu",
+  "topk_k": 3,
+  "displacement_center_mode": "data_mean",
+  "batch_size": 64,
+  "epochs": 2000,
+  "lr": 0.001,
+  "optimizer": "adamw",
+  "weight_decay": 0.1,
+  "scheduler": "cosine",
+  "lr_min": 5e-06,
+  "grad_clip_norm": null,
+  "epsilons": [
+    0.025
+  ],
+  "sparsity_coeffs": [
+    0.0001
+  ],
+  "methods": [
+    "displacement_centered"
+  ],
+  "output_dir": "pointcloud/results/modelnet10_6cls_uniform_centered_cosine_lrmin5e-6",
+  "device": "mps",
+  "gpu_ids": null
+}

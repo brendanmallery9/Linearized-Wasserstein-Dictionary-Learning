@@ -47,7 +47,14 @@ for p in (REPO_ROOT, MNIST_PIPELINE):
     if str(p) not in sys.path:
         sys.path.insert(0, str(p))
 
-from mnist_sae_models import DisplacementFieldSAE, TransportMapSAE  # noqa: E402
+from mnist_sae_models import (  # noqa: E402
+    DisplacementFieldSAE,
+    TransportMapSAE,
+    load_model_state,
+)
+from pointcloud.pipeline.pointcloud_centered_sae import (  # noqa: E402
+    CenteredDisplacementFieldSAE,
+)
 
 # A stable palette so each true digit keeps one color across every panel.
 _PALETTE = ["#1f77b4", "#d62728", "#2ca02c", "#9467bd", "#ff7f0e",
@@ -135,6 +142,15 @@ def _parse_c(ckpt_path):
     return 0.0
 
 
+def _run_c(run):
+    """Read L1 from the filename, falling back to the run configuration."""
+    value = _parse_c(run["ckpt"])
+    if value != 0.0:
+        return value
+    values = run["config"].get("sparsity_coeffs", [])
+    return float(values[0]) if len(values) == 1 else value
+
+
 def _parse_eps(ckpt_path):
     """Pull epsilon out of a `..._eps<value>_c...pt` checkpoint name."""
     stem = ckpt_path.stem
@@ -165,7 +181,7 @@ def run_label(run):
         lr = _fmt_float(cfg.get("lr"))
         eps = _fmt_float(_parse_eps(run["ckpt"]))
         return f"{act} k={cfg.get('topk_k', '?')} lr={lr} eps={eps}{role}"
-    return f"{act}  L1={_parse_c(run['ckpt']):g}{role}"
+    return f"{act}  L1={_run_c(run):g}{role}"
 
 
 # ============================================================
@@ -175,9 +191,17 @@ def rebuild_model(ckpt_path, cfg, device):
     """Reconstruct a trained model exactly as the runner built it."""
     ckpt = torch.load(ckpt_path, map_location="cpu")
     method = ckpt.get("method", "displacement")
-    model_cls = DisplacementFieldSAE if method == "displacement" else TransportMapSAE
+    if method in ("displacement_centered", "centered_displacement"):
+        model_cls = CenteredDisplacementFieldSAE
+    elif method == "displacement":
+        model_cls = DisplacementFieldSAE
+    else:
+        model_cls = TransportMapSAE
+    model_args = [ckpt["X"].float()]
+    if model_cls is CenteredDisplacementFieldSAE:
+        model_args.append(ckpt["displacement_center"].float())
     model = model_cls(
-        ckpt["X"].float(),
+        *model_args,
         m=int(ckpt["m"]),
         eps=float(ckpt["eps"]),
         grid_side=int(cfg.get("grid_side", 32)),
@@ -190,7 +214,7 @@ def rebuild_model(ckpt_path, cfg, device):
         activation_type=cfg.get("activation_type", "relu"),
         topk_k=int(cfg.get("topk_k", 3)),
     ).to(device)
-    model.load_state_dict(ckpt["model_state"])
+    load_model_state(model, ckpt["model_state"])
     model.eval()
     return model
 
@@ -495,7 +519,7 @@ def _write_summary_csv(results, digits, path):
                    cfg.get("epochs", ""), cfg.get("batch_size", ""),
                    cfg.get("lista_steps", ""),
                    cfg.get("grid_support_size", ""),
-                   _parse_c(r["run"]["ckpt"]),
+                   _run_c(r["run"]),
                    f"{r['recon']:.6f}", f"{r['active']:.3f}", f"{r['mse']:.6f}"]
             row += [f"{v:.6f}" if not np.isnan(v) else "nan"
                     for v in r["per_class_mse"]]

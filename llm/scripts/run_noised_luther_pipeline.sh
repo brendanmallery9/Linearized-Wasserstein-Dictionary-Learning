@@ -160,7 +160,8 @@ else
         --epochs     "$EPOCHS" \
         --lr         "$LR" \
         --batch_size "$BATCH_SIZE" \
-        --device     "$DEVICE"
+        --device     "$DEVICE" \
+        --trials     TOPKAE_10 TOPKAE_40 JUMPRELUAE_10 JUMPRELUAE_40
 fi
 
 echo

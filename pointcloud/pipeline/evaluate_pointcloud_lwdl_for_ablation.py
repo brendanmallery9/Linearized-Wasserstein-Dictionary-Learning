@@ -36,7 +36,7 @@ for p in (str(REPO_ROOT), str(MNIST_PIPELINE)):
 
 import torch
 
-from mnist_sae_models import DisplacementFieldSAE, TransportMapSAE
+from mnist_sae_models import DisplacementFieldSAE, TransportMapSAE, load_model_state
 from pointcloud.pipeline.pointcloud_centered_sae import CenteredDisplacementFieldSAE
 from pointcloud.pipeline.pointcloud_data import (
     load_with_labels,
@@ -171,10 +171,7 @@ def build_model_from_checkpoint(ckpt, config, device):
     model_kwargs = {k: v for k, v in model_kwargs.items() if k in valid}
     model = model_cls(*model_args, **model_kwargs)
 
-    missing, unexpected = model.load_state_dict(ckpt["model_state"], strict=False)
-    if missing or unexpected:
-        print(f"  Warning: state_dict mismatch. missing={list(missing)} "
-              f"unexpected={list(unexpected)}")
+    load_model_state(model, ckpt["model_state"])
     model.to(device).eval()
     return model, method, X
 

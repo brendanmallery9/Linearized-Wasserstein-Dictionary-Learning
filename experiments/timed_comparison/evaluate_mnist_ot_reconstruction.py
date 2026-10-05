@@ -20,7 +20,7 @@ if str(MNIST_PIPELINE) not in sys.path:
     sys.path.insert(0, str(MNIST_PIPELINE))
 
 from mnist_ot_data import load_transport_maps  # noqa: E402
-from mnist_sae_models import DisplacementFieldSAE  # noqa: E402
+from mnist_sae_models import DisplacementFieldSAE, load_model_state  # noqa: E402
 from train_mnist_sae import sample_grid_from_data_mixture  # noqa: E402
 
 
@@ -123,7 +123,7 @@ def build_mnist_sae_model(config: dict, checkpoint_path: Path, device: torch.dev
         lateral_init="damped_identity",
     )
     state = torch.load(checkpoint_path, map_location="cpu")
-    model.load_state_dict(state)
+    load_model_state(model, state)
     model = model.to(device)
     model.eval()
     return model, X, maps

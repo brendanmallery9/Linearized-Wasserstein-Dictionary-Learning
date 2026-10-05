@@ -1,0 +1,40 @@
+{
+  "data_dir": "datasets/convex_combos_02378",
+  "classes": null,
+  "test_fraction": 0.1,
+  "seed": 42,
+  "model_seed": 0,
+  "m": 5,
+  "grid_side": 64,
+  "grid_mode": "uniform",
+  "grid_n_clouds": 10,
+  "grid_support_size": 3000,
+  "lista_steps": 20,
+  "activation_type": "relu",
+  "topk_k": 2,
+  "displacement_center_mode": "train_mean",
+  "batch_size": 1024,
+  "epochs": 1000,
+  "lr": 0.00015,
+  "optimizer": "adamw",
+  "weight_decay": 0.0,
+  "scheduler": "cosine",
+  "scheduler_t_max": 1000,
+  "lr_min": 5e-06,
+  "plateau_factor": 0.5,
+  "plateau_patience": 25,
+  "plateau_threshold": 1e-05,
+  "grad_clip_norm": 1.0,
+  "epsilons": [
+    0.025
+  ],
+  "sparsity_coeffs": [
+    0.0001
+  ],
+  "methods": [
+    "displacement_centered"
+  ],
+  "output_dir": "mnist/results/convex_combos_02378_train_mean_seed_sweep/final/seed_000",
+  "device": "mps",
+  "gpu_ids": null
+}

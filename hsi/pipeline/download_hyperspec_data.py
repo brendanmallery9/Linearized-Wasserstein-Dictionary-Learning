@@ -18,6 +18,7 @@ Works for classic MAT and MAT v7.3 (HDF5).
 from __future__ import annotations
 
 import hashlib
+import itertools
 from pathlib import Path
 from typing import Dict, Optional, Any, Tuple
 
@@ -54,6 +55,48 @@ DATASETS: Dict[str, Dict[str, str]] = {
     },
 
 }
+
+# The EHU MediaWiki endpoints are the canonical sources, but they sometimes
+# reject non-browser downloads with HTTP 403.  Keep known byte-for-byte dataset
+# mirrors as fallbacks so a fresh checkout can still prepare the paper data.
+DOWNLOAD_MIRRORS: Dict[Tuple[str, str], Tuple[str, ...]] = {
+    ("salinas_a", "SalinasA_corrected.mat"): (
+        "https://raw.githubusercontent.com/AngryCai/GraphConvSC/master/HSI_Datasets/SalinasA_corrected.mat",
+    ),
+    ("salinas_a", "SalinasA_gt.mat"): (
+        "https://raw.githubusercontent.com/AngryCai/GraphConvSC/master/HSI_Datasets/SalinasA_gt.mat",
+    ),
+    ("botswana", "Botswana.mat"): (
+        "https://huggingface.co/datasets/Tanishq165/HSI_Datasets/resolve/main/Botswana/Botswana_data.mat?download=true",
+    ),
+    ("botswana", "Botswana_gt.mat"): (
+        "https://huggingface.co/datasets/Tanishq165/HSI_Datasets/resolve/main/Botswana/Botswana_gt.mat?download=true",
+    ),
+    ("pavia", "Pavia.mat"): (
+        "https://huggingface.co/datasets/danaroth/pavia/resolve/main/Pavia.mat?download=true",
+    ),
+    ("pavia", "Pavia_gt.mat"): (
+        "https://huggingface.co/datasets/danaroth/pavia/resolve/main/Pavia_gt.mat?download=true",
+    ),
+}
+
+# SHA-256 values for mirrors used when the canonical EHU endpoints reject
+# automated downloads. Verification prevents a mirror change from silently
+# altering the reproduction data.
+DOWNLOAD_SHA256: Dict[Tuple[str, str], str] = {
+    ("pavia", "Pavia.mat"):
+        "b60341da323fd271cd97dd6d7a69514d385ccd7fdfc5a60c4ff5994b047f152e",
+    ("pavia", "Pavia_gt.mat"):
+        "7eb54ab81b404dd3ae572e6d0ec211595029e5a847bec2cfb8f9e72d07066b69",
+}
+
+
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 # ----------------------------
@@ -127,6 +170,14 @@ def download(url: str, outpath: Path, chunk_size: int = 1024 * 1024, max_retries
 
             return
 
+        except requests.exceptions.HTTPError as e:
+            status = e.response.status_code if e.response is not None else None
+            if status is not None and 400 <= status < 500 and status not in (408, 429):
+                print(f"\n⚠ Permanent HTTP error: {e}")
+                raise
+            print(f"\n⚠ Download interrupted (attempt {attempt}/{max_retries}): {e}")
+            time.sleep(min(2 ** attempt, 30))
+            continue
         except (requests.exceptions.ChunkedEncodingError,
                 requests.exceptions.ConnectionError,
                 requests.exceptions.ReadTimeout,
@@ -241,6 +292,18 @@ def to_torch_save(cube: np.ndarray, gt: Optional[np.ndarray], dataset_root: Path
     cube_dir.mkdir(parents=True, exist_ok=True)
 
     cube_np = np.asarray(cube)
+    if gt is not None:
+        gt_shape = tuple(np.asarray(gt).shape)
+        for perm in itertools.permutations(range(3)):
+            permuted_shape = tuple(cube_np.shape[i] for i in perm)
+            if permuted_shape[:2] in (gt_shape, gt_shape[::-1]):
+                if perm != (0, 1, 2):
+                    print(
+                        f"  reorienting cube from {tuple(cube_np.shape)} to "
+                        f"{permuted_shape} to match GT shape {gt_shape}"
+                    )
+                    cube_np = np.transpose(cube_np, perm)
+                break
     if cube_np.dtype not in (
         np.float64,
         np.float32,
@@ -374,7 +437,31 @@ def main() -> None:
         mat_paths = []
         for fname, url in files.items():
             outpath = mat_dir / fname
-            download(url, outpath)
+            urls = (url,) + DOWNLOAD_MIRRORS.get((name, fname), ())
+            expected_sha256 = DOWNLOAD_SHA256.get((name, fname))
+            errors = []
+            for candidate in urls:
+                try:
+                    download(candidate, outpath)
+                    if expected_sha256 is not None:
+                        actual_sha256 = file_sha256(outpath)
+                        if actual_sha256 != expected_sha256:
+                            raise RuntimeError(
+                                f"SHA-256 mismatch for {fname}: got {actual_sha256}, "
+                                f"expected {expected_sha256}"
+                            )
+                        print(f"✓ SHA-256 verified: {fname}")
+                    break
+                except Exception as e:
+                    errors.append(f"{candidate}: {e}")
+                    if outpath.exists():
+                        outpath.unlink()
+                    if candidate != urls[-1]:
+                        print(f"⚠ Trying mirror for {fname}")
+            else:
+                raise RuntimeError(
+                    f"All download sources failed for {fname}:\n  " + "\n  ".join(errors)
+                )
             mat_paths.append(outpath)
 
         cube: Optional[np.ndarray] = None

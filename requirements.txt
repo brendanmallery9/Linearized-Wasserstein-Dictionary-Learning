@@ -1,35 +1,41 @@
+# Reproduction environment
+# Tested on Python 3.12.14. System-level requirements are documented in README.md.
+
 # Core numeric / ML
-numpy<2
-torch
-torchvision
-scipy
+numpy==1.26.4
+torch==2.5.1
+torchvision==0.20.1
+scipy==1.17.1
 
 # Optimal transport
-pot
+POT==0.9.7.post1
 
 # ML utilities
-scikit-learn
-tensorboard
-joblib
+scikit-learn==1.9.0
+tensorboard==2.21.0
+joblib==1.6.0
 
 # Data / NLP (LLM pipeline)
-datasets
-transformers<5
-transformer_lens
+datasets==5.0.1
+transformers==4.57.6
+# 2.15.4 supports the pinned PyTorch version; transformer-lens 3.x requires
+# torch>=2.6 and makes the environment internally inconsistent.
+transformer_lens==2.15.4
 
 # Plotting
-matplotlib
-plotly
-pandas
-seaborn
+matplotlib==3.11.1
+plotly==7.0.0
+pandas==3.0.5
+seaborn==0.13.2
 umap-learn==0.5.12
 numba==0.62.1
 llvmlite==0.45.1
-ipython
-ipywidgets
-pillow
+ipython==9.17.1
+ipywidgets==8.1.9
+notebook==7.4.7
+pillow==12.3.0
 
 # HSI-specific
-h5py
-requests
-tqdm
+h5py==3.16.0
+requests==2.34.2
+tqdm==4.70.0

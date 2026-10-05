@@ -38,7 +38,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from mnist_sae_models import DisplacementFieldSAE, SinkhornAtoms
+from mnist_sae_models import DisplacementFieldSAE, SinkhornAtoms, load_model_state
 
 
 # ============================================================
@@ -414,7 +414,7 @@ def main(checkpoint_dir, data_dir, output_dir, device_str="auto",
 
         model = build_model_from_cfg(cfg, X, device)
         state = torch.load(ckpt_path, map_location=device)
-        model.load_state_dict(state)
+        load_model_state(model, state)
         model.eval()
 
         T_hat, lam, per_recon = forward_subset(model, sub_maps, device)

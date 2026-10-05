@@ -1,6 +1,8 @@
 import os
 import json
 import argparse
+import gc
+import sys
 import torch
 from pathlib import Path
 from datasets import load_dataset
@@ -65,7 +67,7 @@ def main():
     parser.add_argument("--gpu_id", type=int, default=0,
                         help="GPU index for this worker (0-based) — only used when --device=cuda")
     parser.add_argument("--num_gpus", type=int, default=1,
-                        help="Total number of workers splitting the dataset (DOC_INDEX % num_gpus == gpu_id)")
+                        help="Total number of workers splitting the dataset (DOC_INDEX %% num_gpus == gpu_id)")
     parser.add_argument("--device", type=str, default="auto",
                         help="Torch device: 'cuda', 'cpu', 'mps', or 'auto' (default). When 'cuda', actually uses cuda:<gpu_id>.")
     args = parser.parse_args()
@@ -82,6 +84,13 @@ def main():
         DEVICE = f"cuda:{args.gpu_id}"
     else:
         DEVICE = args.device
+
+    if args.streaming:
+        # PyArrow can deadlock while tearing down its global CPU pool when a
+        # streaming Parquet iterator is stopped early.  A single Arrow worker
+        # avoids that shutdown race; model inference remains unaffected.
+        import pyarrow as pa
+        pa.set_cpu_count(1)
 
     out_dir = Path(args.out_dir) / args.subdir
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -168,6 +177,21 @@ def main():
         saved += 1
         print(f"[worker {args.gpu_id}][{DOC_INDEX}] Saved: {out_path.name}  T={T}  acts={acts.shape}  "
               f"(saved={saved}, skipped_len={skipped_len}, already_done={skipped_exists})")
+
+    # Release a partially consumed Parquet fragment before interpreter
+    # finalization; otherwise some PyArrow versions can wait forever while
+    # destroying their global thread pool.
+    del ds
+    gc.collect()
+    if args.streaming:
+        # Some released PyArrow builds still deadlock later in C++ static
+        # finalization even after the fragment is collected.  This process is
+        # a dedicated CLI worker and all writes above are atomic, so bypass
+        # interpreter teardown after a successful streaming run.
+        print(f"[worker {args.gpu_id}] Complete: saved={saved}, skipped_len={skipped_len}, already_done={skipped_exists}")
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(0)
 
 if __name__ == "__main__":
     main()

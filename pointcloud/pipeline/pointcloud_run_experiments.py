@@ -124,6 +124,7 @@ DEFAULT_CONFIG = dict(
     classes=None,            # None = all classes found on disk
     test_fraction=0.1,
     seed=42,
+    model_seed=0,            # deterministic model init and training shuffle
 
     # Model / atoms
     m=20,
@@ -143,7 +144,11 @@ DEFAULT_CONFIG = dict(
     optimizer="adamw",
     weight_decay=1e-4,
     scheduler="cosine",
+    scheduler_t_max=None,   # optional horizon separate from the run length
     lr_min=1e-6,
+    plateau_factor=0.5,
+    plateau_patience=25,
+    plateau_threshold=1e-5,
     grad_clip_norm=None,
 
     # Sweep
@@ -209,6 +214,17 @@ def clone_model_state(model):
     }
 
 
+def seed_model_and_training(seed):
+    """Seed model initialization and subsequent DataLoader shuffling."""
+    if seed is None:
+        return
+    seed = int(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
+
 def make_displacement_center(train_loader, maps, X, mode):
     """Build the fixed displacement center for displacement_centered runs."""
     mode = str(mode)
@@ -242,8 +258,18 @@ def train_one_model(model, train_loader, test_loader, config, device):
     scheduler = None
     if config.get("scheduler", "none") == "cosine":
         eta_min = config.get("lr_min") or 0.0
+        t_max = config.get("scheduler_t_max") or config["epochs"]
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            opt, T_max=config["epochs"], eta_min=eta_min,
+            opt, T_max=t_max, eta_min=eta_min,
+        )
+    elif config.get("scheduler", "none") == "plateau":
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            opt,
+            mode="min",
+            factor=config["plateau_factor"],
+            patience=config["plateau_patience"],
+            threshold=config["plateau_threshold"],
+            min_lr=config.get("lr_min") or 0.0,
         )
 
     if grad_clip_norm is not None and grad_clip_norm > 0:
@@ -279,10 +305,12 @@ def train_one_model(model, train_loader, test_loader, config, device):
             epoch_loss += loss.item()
             epoch_steps += 1
 
-        if scheduler is not None:
-            scheduler.step()
-
         avg_loss = epoch_loss / epoch_steps
+        if scheduler is not None:
+            if config.get("scheduler") == "plateau":
+                scheduler.step(avg_loss)
+            else:
+                scheduler.step()
         if epoch == 0 or avg_loss < best_epoch_loss:
             best_epoch_loss = avg_loss
             best_epoch = epoch + 1
@@ -405,6 +433,12 @@ def run_all_experiments(config=None):
         else:
             raise ValueError(f"Unknown method: {method}")
 
+        base_model_seed = config.get("model_seed")
+        run_model_seed = None if base_model_seed is None else int(base_model_seed) + run_idx
+        seed_model_and_training(run_model_seed)
+        if run_model_seed is not None:
+            print(f"  Model/training seed: {run_model_seed}", flush=True)
+
         model_kwargs = dict(
             m=config["m"], eps=eps,
             grid_side=config["grid_side"],
@@ -438,6 +472,7 @@ def run_all_experiments(config=None):
             "sparsity_coeff": c,
             "device": str(device),
             "m": config["m"],
+            "model_seed": run_model_seed,
             "epochs": config["epochs"],
             "lr": config["lr"],
             "grad_clip_norm": config.get("grad_clip_norm"),
@@ -475,6 +510,7 @@ def run_all_experiments(config=None):
             "eps": eps,
             "sparsity_coeff": c,
             "m": config["m"],
+            "model_seed": run_model_seed,
             "lista_steps": config["lista_steps"],
             "grid_points": grid_points,
             "X": X,
@@ -550,12 +586,23 @@ if __name__ == "__main__":
     parser.add_argument("--grid_support_size", type=int,
                         default=DEFAULT_CONFIG["grid_support_size"])
     parser.add_argument("--scheduler", type=str, default=DEFAULT_CONFIG["scheduler"],
-                        choices=["none", "cosine"])
+                        choices=["none", "cosine", "plateau"])
+    parser.add_argument("--scheduler_t_max", type=int,
+                        default=DEFAULT_CONFIG["scheduler_t_max"],
+                        help="Optional cosine-schedule horizon; defaults to --epochs.")
     parser.add_argument("--lr_min", type=float, default=DEFAULT_CONFIG["lr_min"])
+    parser.add_argument("--plateau_factor", type=float,
+                        default=DEFAULT_CONFIG["plateau_factor"])
+    parser.add_argument("--plateau_patience", type=int,
+                        default=DEFAULT_CONFIG["plateau_patience"])
+    parser.add_argument("--plateau_threshold", type=float,
+                        default=DEFAULT_CONFIG["plateau_threshold"])
     parser.add_argument("--grad_clip_norm", type=float,
                         default=DEFAULT_CONFIG["grad_clip_norm"],
                         help="If >0, clip gradient norm to this value after backward.")
     parser.add_argument("--seed", type=int, default=DEFAULT_CONFIG["seed"])
+    parser.add_argument("--model_seed", type=int, default=DEFAULT_CONFIG["model_seed"],
+                        help="Seed model initialization and training shuffle independently of the split seed.")
     parser.add_argument("--classes", type=str, nargs="*", default=None)
     parser.add_argument("--test_fraction", type=float,
                         default=DEFAULT_CONFIG["test_fraction"])

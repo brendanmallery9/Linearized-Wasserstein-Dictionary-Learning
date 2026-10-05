@@ -1,0 +1,117 @@
+{
+  "restricted_correct": 24,
+  "restricted_total": 25,
+  "all_digits_correct": 17,
+  "all_digits_total": 25,
+  "matched_atom_mse": 0.017417874187231064,
+  "test_recon_loss": 0.0004611102392276128,
+  "best_epoch": 862,
+  "restricted_detail": {
+    "0": {
+      "correct": 5,
+      "neighbors": [
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    "2": {
+      "correct": 5,
+      "neighbors": [
+        2,
+        2,
+        2,
+        2,
+        2
+      ]
+    },
+    "3": {
+      "correct": 5,
+      "neighbors": [
+        3,
+        3,
+        3,
+        3,
+        3
+      ]
+    },
+    "7": {
+      "correct": 5,
+      "neighbors": [
+        7,
+        7,
+        7,
+        7,
+        7
+      ]
+    },
+    "8": {
+      "correct": 4,
+      "neighbors": [
+        8,
+        8,
+        8,
+        8,
+        3
+      ]
+    }
+  },
+  "all_digits_detail": {
+    "0": {
+      "correct": 5,
+      "neighbors": [
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    "2": {
+      "correct": 5,
+      "neighbors": [
+        2,
+        2,
+        2,
+        2,
+        2
+      ]
+    },
+    "3": {
+      "correct": 4,
+      "neighbors": [
+        3,
+        3,
+        3,
+        3,
+        1
+      ]
+    },
+    "7": {
+      "correct": 1,
+      "neighbors": [
+        9,
+        1,
+        9,
+        7,
+        1
+      ]
+    },
+    "8": {
+      "correct": 2,
+      "neighbors": [
+        8,
+        1,
+        1,
+        5,
+        8
+      ]
+    }
+  },
+  "stage": "final",
+  "seed": 0,
+  "epochs": 1000,
+  "checkpoint": "mnist/results/convex_combos_02378_train_mean_seed_sweep/final/seed_000/displacement_centered_eps0.025_c0.0001_best.pt"
+}

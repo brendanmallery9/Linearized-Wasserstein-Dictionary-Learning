@@ -123,10 +123,15 @@ def main():
                              "Default: all 10. Coefficient columns align to this order.")
     parser.add_argument("--digit_sample_index", type=int, default=0,
                         help="Which sample to take from each digit_<d>/mappings.pt.")
+    parser.add_argument("--pure_digit_repeats", type=int, default=0,
+                        help="Compatibility option for experiment scripts; only 0 is currently supported.")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--python", type=str, default=sys.executable,
                         help="Python used to run prepare_mnist_ot.py if needed.")
     args = parser.parse_args()
+
+    if args.pure_digit_repeats != 0:
+        parser.error("--pure_digit_repeats currently supports only 0")
 
     t0 = time.time()
     ensure_mnist_ot(args.mnist_ot_dir, args.python)

@@ -6,6 +6,8 @@
 #   bash llm/scripts/run_pile100k_pipeline.sh --device mps             # Apple Silicon
 #   bash llm/scripts/run_pile100k_pipeline.sh --device cpu             # CPU only
 #   bash llm/scripts/run_pile100k_pipeline.sh --num-gpus 4             # multi-GPU embed (cuda only)
+#   bash llm/scripts/run_pile100k_pipeline.sh --n-docs 100              # smaller local run
+#   bash llm/scripts/run_pile100k_pipeline.sh --epochs 50 --lr 5e-4     # override training
 #   bash llm/scripts/run_pile100k_pipeline.sh --embed                  # compute missing activations
 #   bash llm/scripts/run_pile100k_pipeline.sh --skip-embed             # reuse existing activations
 #   bash llm/scripts/run_pile100k_pipeline.sh --skip-gaussian          # reuse source.pt + pca.pt
@@ -23,10 +25,12 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 # ---- defaults (overridable via flags or env) ----
 ROOT="${ROOT:-$REPO_ROOT/datasets/pile-100k}"
 DATASET="${DATASET:-jannikbrinkmann/pile-100k}"
-N_DOCS="${N_DOCS:-100}"             # -1 means all docs
+N_DOCS="${N_DOCS:--1}"              # -1 means all docs (the paper-scale run)
 STREAMING="${STREAMING:-true}"
 SEED="${SEED:-42}"
-EPOCHS="${EPOCHS:-200}"
+EPOCHS="${EPOCHS:-3000}"
+LR="${LR:-5e-4}"
+BATCH_SIZE="${BATCH_SIZE:-1024}"
 NUM_GPUS="${NUM_GPUS:-1}"          # parallel embed processes (cuda only)
 
 MODEL="${MODEL:-EleutherAI/pythia-410m-deduped}"
@@ -49,6 +53,8 @@ while [[ $# -gt 0 ]]; do
         --device)         DEVICE="$2"; shift 2 ;;
         --num-gpus)       NUM_GPUS="$2"; shift 2 ;;
         --epochs)         EPOCHS="$2"; shift 2 ;;
+        --lr)             LR="$2"; shift 2 ;;
+        --batch-size)     BATCH_SIZE="$2"; shift 2 ;;
         --n-docs)         N_DOCS="$2"; shift 2 ;;
         --root)           ROOT="$2"; shift 2 ;;
         --embed)          SKIP_EMBED=false; shift ;;
@@ -58,7 +64,7 @@ while [[ $# -gt 0 ]]; do
         --train)          SKIP_TRAIN=false; shift ;;
         --force-train)    FORCE_TRAIN=true; shift ;;
         --skip-train)     SKIP_TRAIN=true; shift ;;
-        -h|--help)        sed -n '2,15p' "$0"; exit 0 ;;
+        -h|--help)        sed -n '2,18p' "$0"; exit 0 ;;
         *) echo "Unknown arg: $1"; exit 1 ;;
     esac
 done
@@ -110,6 +116,8 @@ echo "DEVICE     = $DEVICE"
 echo "NUM_GPUS   = $NUM_GPUS"
 echo "N_DOCS     = $N_DOCS  (-1 = all)"
 echo "EPOCHS     = $EPOCHS"
+echo "LR         = $LR"
+echo "BATCH_SIZE = $BATCH_SIZE"
 echo
 
 # ----------------------------------------------------------------------------
@@ -124,7 +132,10 @@ else
     [ "$N_DOCS" -gt 0 ]    && EMBED_EXTRA_FLAGS="$EMBED_EXTRA_FLAGS --n_docs $N_DOCS"
 
     PIDS=""
-    for GPU_ID in $(seq 0 $((NUM_GPUS - 1))); do
+    if [ "$NUM_GPUS" -eq 1 ]; then
+        # Keep the single-device worker in the foreground.  On macOS,
+        # PyArrow's Parquet streaming teardown can deadlock when the Python
+        # interpreter was launched as a background shell job.
         # shellcheck disable=SC2086
         python "$PIPELINE_DIR/embed_document_from_hf.py" \
             --out_dir    "$ACT_DIR" \
@@ -133,25 +144,39 @@ else
             --seed       "$SEED" \
             --subdir     pile \
             --device     "$DEVICE" \
-            --gpu_id     "$GPU_ID" \
-            --num_gpus   "$NUM_GPUS" \
-            $EMBED_EXTRA_FLAGS &
-        PID=$!
-        PIDS="${PIDS:+$PIDS }$PID"
-        echo "  Launched worker $GPU_ID (PID $PID)"
-    done
+            --gpu_id     0 \
+            --num_gpus   1 \
+            $EMBED_EXTRA_FLAGS
+    else
+        for GPU_ID in $(seq 0 $((NUM_GPUS - 1))); do
+            # shellcheck disable=SC2086
+            python "$PIPELINE_DIR/embed_document_from_hf.py" \
+                --out_dir    "$ACT_DIR" \
+                --model_name "$MODEL" \
+                --dataset    "$DATASET" \
+                --seed       "$SEED" \
+                --subdir     pile \
+                --device     "$DEVICE" \
+                --gpu_id     "$GPU_ID" \
+                --num_gpus   "$NUM_GPUS" \
+                $EMBED_EXTRA_FLAGS &
+            PID=$!
+            PIDS="${PIDS:+$PIDS }$PID"
+            echo "  Launched worker $GPU_ID (PID $PID)"
+        done
 
-    EMBED_FAIL=0
-    for PID in $PIDS; do
-        if ! wait "$PID"; then
-            echo "ERROR: Embedding process $PID failed"
-            EMBED_FAIL=1
+        EMBED_FAIL=0
+        for PID in $PIDS; do
+            if ! wait "$PID"; then
+                echo "ERROR: Embedding process $PID failed"
+                EMBED_FAIL=1
+            fi
+        done
+        PIDS=""
+        if [ "$EMBED_FAIL" -ne 0 ]; then
+            echo "One or more embedding processes failed. Aborting."
+            exit 1
         fi
-    done
-    PIDS=""
-    if [ "$EMBED_FAIL" -ne 0 ]; then
-        echo "One or more embedding processes failed. Aborting."
-        exit 1
     fi
     echo "All $NUM_GPUS embedding process(es) completed successfully."
 fi
@@ -213,9 +238,10 @@ else
         --stack_dir   "$SAE_STACK" \
         --n_per_dir   -1 \
         --epochs      "$EPOCHS" \
-        --lr          5e-6 \
-        --batch_size  1024 \
-        --device      "$DEVICE"
+        --lr          "$LR" \
+        --batch_size  "$BATCH_SIZE" \
+        --device      "$DEVICE" \
+        --trials      JUMPRELUAE_512_1e-1
 fi
 
 echo

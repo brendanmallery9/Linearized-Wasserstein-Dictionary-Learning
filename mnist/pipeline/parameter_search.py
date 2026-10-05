@@ -38,7 +38,7 @@ import torch.multiprocessing as mp
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, TensorDataset
 
-from mnist_sae_models import DisplacementFieldSAE
+from mnist_sae_models import DisplacementFieldSAE, load_model_state
 from train_mnist_sae import compute_losses
 
 
@@ -552,7 +552,7 @@ def worker(worker_id, trial_cfg, stage_index, stage_epochs, data_dir, output_dir
 
         if state_path.exists():
             checkpoint = torch.load(state_path, map_location="cpu")
-            model.load_state_dict(checkpoint["model_state"])
+            load_model_state(model, checkpoint["model_state"])
             optimizer_state = checkpoint.get("optimizer_state")
             scheduler_state = checkpoint.get("scheduler_state")
             epochs_completed = int(checkpoint.get("epochs_completed", 0))

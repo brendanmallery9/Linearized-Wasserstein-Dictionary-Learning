@@ -8,7 +8,7 @@
 #   2. Train the displacement-field (or raw-map) SAE
 #      (pointcloud_run_experiments.py).
 #   3. Evaluation is not yet automated for point clouds; analysis lives in
-#      pointcloud/analysis/notebooks/pointcloud_WDL_analysis.ipynb.
+#      pointcloud/analysis/pointcloud_WDL_analysis.ipynb.
 #
 # Defaults reproduce the modelnet10 6-class chair-base experiment that lives
 # at datasets/modelnet10_6cls_chair_ot / pointcloud/results/modelnet10_6cls_chair.
@@ -418,4 +418,4 @@ run_training
 echo ""
 echo "Done."
 echo "Checkpoint and metrics: $OUTPUT_DIR"
-echo "Analysis lives in pointcloud/analysis/notebooks/pointcloud_WDL_analysis.ipynb."
+echo "Analysis lives in pointcloud/analysis/pointcloud_WDL_analysis.ipynb."
