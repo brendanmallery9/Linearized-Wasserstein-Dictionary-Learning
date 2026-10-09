@@ -213,9 +213,9 @@ Pavia and MNIST experiments.  Potential-method rows intentionally leave
 in the potential embedding space.  The Gaussian dimension sweep is a timing
 comparison, so it reports embedded reconstruction losses rather than W2.
 
-## Mark 2 Fixed-Duration Timing Suite
+## Fixed-Duration Timing Experiment
 
-`run_timing_suite_mark2.py` runs the fixed-duration scaling suite:
+`run_timing_experiment.py` runs the fixed-duration scaling experiment:
 
 - Pavia 1D: transport-map SAE, EBCM with `eps=0.025`, and Heitz at
   `gamma=0.5` and `gamma=2.0`
@@ -227,7 +227,7 @@ comparison, so it reports embedded reconstruction losses rather than W2.
 Full run:
 
 ```bash
-python experiments/timed_comparison/run_timing_suite_mark2.py \
+python experiments/timed_comparison/run_timing_experiment.py \
   --device cuda \
   --heitz-avx on
 ```
@@ -235,7 +235,7 @@ python experiments/timed_comparison/run_timing_suite_mark2.py \
 Python-side smoke test without building/running Heitz:
 
 ```bash
-python experiments/timed_comparison/run_timing_suite_mark2.py \
+python experiments/timed_comparison/run_timing_experiment.py \
   --sample-sizes 10 \
   --duration-seconds 2 \
   --epochs 1 \
@@ -248,19 +248,19 @@ python experiments/timed_comparison/run_timing_suite_mark2.py \
   --skip-heitz
 ```
 
-Outputs include `timing_table_mark2.csv`, `timing_table_mark2.html`,
+Outputs include `timing_table.csv`, `timing_table.html`,
 `loss_history_all.csv`, and one loss-curve PNG per experiment.
 
 For Heitz runs, the `1000` second cap is checked by the patched C++ optimizer
 between LBFGS iterations, so a long iteration can overshoot the cap before the
 run cancels.  If Heitz cancels before all `finalFitting_*.png` reconstruction
-files are written, Mark 2 records `eval_status=partial_outputs` or
+files are written, the experiment records `eval_status=partial_outputs` or
 `missing_outputs` instead of aborting the suite.
 
 Requested WDL/LWDL comparison run:
 
 ```bash
-python experiments/timed_comparison/run_timing_suite_mark2.py \
+python experiments/timed_comparison/run_timing_experiment.py \
   --wdl-lwdl-timing-run \
   --device cuda \
   --heitz-avx on

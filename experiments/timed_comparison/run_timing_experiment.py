@@ -54,7 +54,7 @@ from run_timing_suite import (
 )
 
 
-MARK2_EPSILON = 0.025
+TIMING_EPSILON = 0.025
 DEFAULT_SAMPLE_SIZES = [100, 1000, 10000]
 DEFAULT_DURATION_SECONDS = 1000.0
 DEFAULT_PAVIA_METHODS = ["transport_map", "ebcm", "heitz"]
@@ -90,7 +90,7 @@ def parse_int_list(values: list[str] | None, default: list[int]) -> list[int]:
     return out
 
 
-def mark2_args(args: argparse.Namespace, *, pavia_samples: int | None = None, mnist_samples: int | None = None) -> SimpleNamespace:
+def timing_args(args: argparse.Namespace, *, pavia_samples: int | None = None, mnist_samples: int | None = None) -> SimpleNamespace:
     if mnist_samples is not None and mnist_samples % 10 != 0:
         raise ValueError("MNIST sample sizes must be divisible by 10 for balanced digit subsets")
     return SimpleNamespace(
@@ -260,8 +260,8 @@ def run_pavia_size(
     cache_dir: Path,
     device: torch.device,
 ) -> list[dict[str, Any]]:
-    print(f"\n=== Mark 2 Pavia 1D: n={sample_size} ===", flush=True)
-    suite_args = mark2_args(args, pavia_samples=sample_size)
+    print(f"\n=== Timing experiment: Pavia 1D, n={sample_size} ===", flush=True)
+    suite_args = timing_args(args, pavia_samples=sample_size)
     exp_dir = run_dir / "pavia1d" / f"n{sample_size}"
     exp_dir.mkdir(parents=True, exist_ok=True)
     log_dir = exp_dir / "logs"
@@ -296,7 +296,7 @@ def run_pavia_size(
             seed=args.seed,
             device=device,
             history_path=history_path,
-            run_name=f"mark2_pavia_n{sample_size}_transport",
+            run_name=f"timing_pavia_n{sample_size}_transport",
             history_time_offset=0.0,
             max_elapsed_seconds=args.duration_seconds,
             plateau_window=0,
@@ -334,22 +334,22 @@ def run_pavia_size(
             data,
             cache_dir,
             method="ebcm",
-            eps=MARK2_EPSILON,
+            eps=TIMING_EPSILON,
             force=args.force_cache,
             progress_every=args.progress_every,
         )
-        history_path = exp_dir / f"ebcm_eps{label_float(MARK2_EPSILON)}_history.jsonl"
-        checkpoint_path = exp_dir / f"ebcm_eps{label_float(MARK2_EPSILON)}_last_good_on_numerical_error.pt"
+        history_path = exp_dir / f"ebcm_eps{label_float(TIMING_EPSILON)}_history.jsonl"
+        checkpoint_path = exp_dir / f"ebcm_eps{label_float(TIMING_EPSILON)}_last_good_on_numerical_error.pt"
         t0 = time.monotonic()
         _, metrics, recon = train_ebcm(
             as_points(data["source_points"]),
             maps,
-            eps=MARK2_EPSILON,
+            eps=TIMING_EPSILON,
             grid_points=as_points(data["target_points"]),
             args=suite_args,
             device=device,
             history_path=history_path,
-            run_name=f"mark2_pavia_n{sample_size}_ebcm_eps{MARK2_EPSILON:g}",
+            run_name=f"timing_pavia_n{sample_size}_ebcm_eps{TIMING_EPSILON:g}",
             history_time_offset=0.0,
             checkpoint_path=checkpoint_path,
         )
@@ -360,7 +360,7 @@ def run_pavia_size(
             sample_size=sample_size,
             method="ebcm",
             variant="entropic_displacement",
-            epsilon=MARK2_EPSILON,
+            epsilon=TIMING_EPSILON,
             embedding_seconds=embed_seconds,
             train_seconds=train_seconds,
             epochs_completed=metrics["epochs_completed"],
@@ -435,8 +435,8 @@ def run_mnist_size(
     cache_dir: Path,
     device: torch.device,
 ) -> list[dict[str, Any]]:
-    print(f"\n=== Mark 2 MNIST 2D: n={sample_size} ===", flush=True)
-    suite_args = mark2_args(args, mnist_samples=sample_size)
+    print(f"\n=== Timing experiment: MNIST 2D, n={sample_size} ===", flush=True)
+    suite_args = timing_args(args, mnist_samples=sample_size)
     exp_dir = run_dir / "mnist" / f"n{sample_size}"
     exp_dir.mkdir(parents=True, exist_ok=True)
     log_dir = exp_dir / "logs"
@@ -448,22 +448,22 @@ def run_mnist_size(
         maps, embed_seconds, maps_path = prepare_mnist_maps(
             data,
             cache_dir,
-            eps=MARK2_EPSILON,
+            eps=TIMING_EPSILON,
             force=args.force_cache,
             progress_every=args.progress_every,
         )
-        history_path = exp_dir / f"ebcm_eps{label_float(MARK2_EPSILON)}_history.jsonl"
-        checkpoint_path = exp_dir / f"ebcm_eps{label_float(MARK2_EPSILON)}_last_good_on_numerical_error.pt"
+        history_path = exp_dir / f"ebcm_eps{label_float(TIMING_EPSILON)}_history.jsonl"
+        checkpoint_path = exp_dir / f"ebcm_eps{label_float(TIMING_EPSILON)}_last_good_on_numerical_error.pt"
         t0 = time.monotonic()
         _, metrics, recon = train_ebcm(
             as_points(data["source_points"]),
             maps,
-            eps=MARK2_EPSILON,
+            eps=TIMING_EPSILON,
             grid_points=None,
             args=suite_args,
             device=device,
             history_path=history_path,
-            run_name=f"mark2_mnist_n{sample_size}_ebcm_eps{MARK2_EPSILON:g}",
+            run_name=f"timing_mnist_n{sample_size}_ebcm_eps{TIMING_EPSILON:g}",
             history_time_offset=0.0,
             checkpoint_path=checkpoint_path,
         )
@@ -474,7 +474,7 @@ def run_mnist_size(
             sample_size=sample_size,
             method="ebcm",
             variant="entropic_displacement",
-            epsilon=MARK2_EPSILON,
+            epsilon=TIMING_EPSILON,
             embedding_seconds=embed_seconds,
             train_seconds=train_seconds,
             epochs_completed=metrics["epochs_completed"],
@@ -618,7 +618,7 @@ def write_loss_plots(rows: list[dict[str, Any]], out_dir: Path) -> dict[str, str
             group = group.sort_values("elapsed_seconds")
             label = make_loss_label(group.iloc[0])
             ax.plot(group["elapsed_seconds"], group["loss"], linewidth=1.8, label=label)
-        ax.set_title(f"Mark 2 {experiment} loss over time")
+        ax.set_title(f"{experiment} loss over time")
         ax.set_xlabel("elapsed seconds")
         ax.set_ylabel("training/loss-eval loss")
         ax.grid(True, alpha=0.25)
@@ -632,7 +632,7 @@ def write_loss_plots(rows: list[dict[str, Any]], out_dir: Path) -> dict[str, str
 
 
 def write_current_outputs(rows: list[dict[str, Any]], run_dir: Path) -> tuple[dict[str, str], dict[str, str]]:
-    table_paths = save_table(rows, run_dir, "timing_table_mark2")
+    table_paths = save_table(rows, run_dir, "timing_table")
     plot_paths = write_loss_plots(rows, run_dir)
     write_json(run_dir / "summary.json", {
         "run_dir": str(run_dir),
@@ -653,9 +653,9 @@ def cleanup_results_only(run_dir: Path, cache_dir: Path) -> None:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run Mark 2 fixed-duration timing suite.")
-    parser.add_argument("--run-dir", type=Path, default=REPO_ROOT / "experiments" / "results" / f"timing_suite_mark2_{timestamp()}")
-    parser.add_argument("--cache-dir", type=Path, default=REPO_ROOT / "experiments" / "results" / "timing_cache_mark2")
+    parser = argparse.ArgumentParser(description="Run the fixed-duration timing experiment.")
+    parser.add_argument("--run-dir", type=Path, default=REPO_ROOT / "experiments" / "results" / f"timing_experiment_{timestamp()}")
+    parser.add_argument("--cache-dir", type=Path, default=REPO_ROOT / "experiments" / "results" / "timing_experiment_cache")
     parser.add_argument("--experiment", choices=["all", "pavia1d", "mnist"], default="all")
     parser.add_argument("--sample-sizes", nargs="*", default=None)
     parser.add_argument("--duration-seconds", type=float, default=DEFAULT_DURATION_SECONDS)
@@ -693,9 +693,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--base-supp-size", type=int, default=400)
 
     parser.add_argument("--pavia-methods", nargs="*", choices=DEFAULT_PAVIA_METHODS, default=None,
-                        help="Mark 2 Pavia methods to run.")
+                        help="Pavia methods to run.")
     parser.add_argument("--mnist-methods", nargs="*", choices=DEFAULT_MNIST_METHODS, default=None,
-                        help="Mark 2 MNIST methods to run.")
+                        help="MNIST methods to run.")
     parser.add_argument("--heitz-gammas", nargs="*", default=None)
     parser.add_argument("--heitz-sinkhorn-iters", type=int, default=5)
     parser.add_argument("--heitz-max-optim-iter", type=int, default=1_000_000)
@@ -751,7 +751,7 @@ def main() -> None:
 
     manifest = vars(args).copy()
     manifest["device_resolved"] = str(device)
-    manifest["epsilon"] = MARK2_EPSILON
+    manifest["epsilon"] = TIMING_EPSILON
     manifest["pavia_methods"] = args.pavia_methods
     manifest["mnist_methods"] = args.mnist_methods
     manifest["results_only"] = args.results_only
@@ -770,7 +770,7 @@ def main() -> None:
             },
             "mnist": {
                 str(sample_size): {
-                    "lwdl": [f"ebcm_eps{MARK2_EPSILON:g}"],
+                    "lwdl": [f"ebcm_eps{TIMING_EPSILON:g}"],
                     "batch_size": args.batch_size or sample_size,
                     "heitz_gammas": WDL_LWDL_TIMING_MNIST_GAMMAS[sample_size],
                     "sinkhorn_iters": args.heitz_sinkhorn_iters,
@@ -810,7 +810,7 @@ def main() -> None:
     })
     if args.results_only:
         cleanup_results_only(run_dir, cache_dir)
-    print(f"\nMark 2 timing suite complete: {run_dir}", flush=True)
+    print(f"\nTiming experiment complete: {run_dir}", flush=True)
     print(f"Table: {table_paths['csv']}", flush=True)
     if "history_csv" in plot_paths:
         print(f"Loss history: {plot_paths['history_csv']}", flush=True)
