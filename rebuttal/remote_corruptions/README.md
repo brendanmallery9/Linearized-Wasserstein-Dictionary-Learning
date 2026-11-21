@@ -1,5 +1,7 @@
 # Remote frozen point-cloud noise experiments — agent handoff
 
+**Check [RUN_STATUS.md](RUN_STATUS.md) first: an execution has already been launched. Inspect its current status before starting any duplicate.**
+
 Read this document in full. It is self-contained: prior chat history and Mac files are not needed. The user requested (A) stronger Gaussian measurement noise and then (B) correlated depth noise/scan stripes, comparing our constrained dictionary against **both PCA and positive sparse coding**. This is evaluation, **not training**.
 
 ## 1. Scientific question and context
