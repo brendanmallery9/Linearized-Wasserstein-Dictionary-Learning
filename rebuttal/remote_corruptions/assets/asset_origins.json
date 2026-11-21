@@ -1,0 +1,9 @@
+{
+  "source_file_hashes": {
+    "pointcloud/results/rebuttal_exp005_corruptions_20261120/data.pt": "7822536f21fb4bc0c9d28fb6402fdbca2037e5bb52e0da63fafe23f202313145",
+    "pointcloud/results/rebuttal_exp003_corruptions_20261120/frozen_probes.joblib": "8209e44e3b1b6eaea3d9a55af5f028770cc1d6630d3758afe08dc39ceff86d59",
+    "pointcloud/results/rebuttal_exp001_bounded_20261120_v3/geometry.pt": "91927c9258a76fb5fb76a27ed9dacf750026b6e9866475337ba43f2f2822d83c"
+  },
+  "prepared_540_note": "holdout_checks.json pins the original EXP004 preparation artifact; holdout_540.pt is the EXP005 selected-field copy of identical raw/maps/labels/identities. Use SHA256SUMS.json for packaged bytes.",
+  "raw_archive_sha256": "9d8679435fc07d1d26f13009878db164a7aa8ea5e7ea3c8880e42794b7307d51"
+}

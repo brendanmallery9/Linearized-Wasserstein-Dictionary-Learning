@@ -1,0 +1,5 @@
+# Integration validation, not scientific findings
+
+2026-11-21: portable CPU and remote CUDA smoke checks passed for all15 models, original60 codes, all q1..30 probe labels, exact geometry/mapping, generator determinism and matched-RMS depth controls. Same pinned Python3.12/numpy/torch/sklearn environment as the frozen artifacts. The separate six-shape, five-condition pilot (clean +all four noise families at sigma.075/draw0) completed exit0 in34.92s. This establishes pipeline integration, not performance rankings on540.
+
+The first tar-only pilot invocation failed before scientific evaluation because its working directory was not a Git repository, so provenance could not resolve HEAD; stderr/empty attempt were preserved on the instance. Corrected the invocation to run from a Git checkout; the second pilot passed without changing solver/model tolerances. CPU/CUDA checks were unaffected. Remote CPU quota was13.44 cores despite56 visible logical CPUs;8 workers is a conservative declared starting allocation. GPU RTX3060/12GiB was idle before tests.

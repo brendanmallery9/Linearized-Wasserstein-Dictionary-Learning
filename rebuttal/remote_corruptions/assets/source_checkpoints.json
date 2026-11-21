@@ -1,0 +1,17 @@
+{
+  "pointcloud/results/rebuttal_exp002_transport_20261120/eot_eta0.001_seed0/model.pt": "3fd5a7c653bad831f6cc522eefc045e16b91443698175d26806eae3c497c80ee",
+  "pointcloud/results/rebuttal_exp002_transport_20261120/eot_eta0.001_seed1/model.pt": "8ad280a28175a4a73cb8506c576154857fc6962c135ff4c4967f99ce87999ef1",
+  "pointcloud/results/rebuttal_exp002_transport_20261120/eot_eta0.001_seed2/model.pt": "5fbe854a8fe04d07ae3c7f959a9fc02ea2fa20605d71fddc7c05539241c5b6aa",
+  "pointcloud/results/rebuttal_exp002_transport_20261120/free_eta0.01_seed0/model.pt": "8ffb8bc05ae5c3311d01a1795b5c5ee4a138e31a1c3928d71e8ef2e3e94e3561",
+  "pointcloud/results/rebuttal_exp002_transport_20261120/free_eta0.01_seed1/model.pt": "586415888cf4fe71947e6deb2929e42e73301aeed8c6e4ebd62de71d6e48d02c",
+  "pointcloud/results/rebuttal_exp002_transport_20261120/free_eta0.01_seed2/model.pt": "1b57de68faa2c8702e69fa93bf95f77303cc80cbcbf31e231556054f403df29f",
+  "pointcloud/results/rebuttal_exp002_transport_20261120/eot_k3_seed0/model.pt": "2202de22cfdcf1b7504f82b320b3831b47e62fcfde126c6ebc71b6435a243220",
+  "pointcloud/results/rebuttal_exp002_transport_20261120/eot_k3_seed1/model.pt": "5cfe4215b8bb9a386fdb8d0fe26202a5adc6026e02d1407e140b2aaa2ff14728",
+  "pointcloud/results/rebuttal_exp002_transport_20261120/eot_k3_seed2/model.pt": "9475173bc756b1caf4e09c99640e7c0c325516498cb32e17bb7ec7775086404c",
+  "pointcloud/results/rebuttal_exp002_transport_20261120/free_k3_seed0/model.pt": "0e2ecf040fb48775226330b7be1849060a48c122b4b7fd8354305b4ebd55a721",
+  "pointcloud/results/rebuttal_exp002_transport_20261120/free_k3_seed1/model.pt": "149764e2e5cd370df60317c4cb978c4e82575cb576c0b86114bf0a8c9a96a245",
+  "pointcloud/results/rebuttal_exp002_transport_20261120/free_k3_seed2/model.pt": "e6837d6c3165fd8223737da70646df91ee39f225c90a2386c9ee26371d3f4403",
+  "pointcloud/results/rebuttal_exp001_bounded_20261120_v3/m30/map_pca_seed000/model.joblib": "9984d5324d5b868116916cc74ce1f14ea6fbc31fc83b001b578a5a2b517e1c8b",
+  "pointcloud/results/rebuttal_exp002_transport_20261120/fresh_holdout/selected_sc_positiveFalse.joblib": "85c62a9f4d213a1f8314e395719f4308a123bd4a3292527cbc7c8a616cfbf81c",
+  "pointcloud/results/rebuttal_exp002_transport_20261120/fresh_holdout/selected_sc_positiveTrue.joblib": "74af026b6ef1f6dca6297fa901fec17cfbc2f47596c5d2e8e96738b8bc333909"
+}

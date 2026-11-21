@@ -1,0 +1,3 @@
+# Remote point-cloud noise handoff
+
+Read README.md in this directory before running. Assets and runner are self-contained; do not import the Mac-only rebuttal experiment scripts. EXP-007 is the stronger IID continuation and EXP-008 is reserved for correlated depth/stripes. No training, probe refitting, solver substitutions or corruption-level selection on evaluated outcomes. Preserve other jobs/dirty work and do not expose a service or copy credentials. The correct existing WDL environment is /workspace/wdl-venv, superseding old base-image setup notes. This handoff's tested runner freezes the original model/probe states. Integration tests are not scientific results. Keep actual family/sigma results separate, with sample sizes/seed distinctions and exact-OT metrics.

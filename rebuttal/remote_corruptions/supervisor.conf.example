@@ -1,0 +1,11 @@
+; Edit paths/program name, ensure output root is NEW, choose workers from pilot.
+[program:wdl-noise-exp007-008]
+command=/workspace/wdl-venv/bin/python -u /workspace/wdl-noise-handoff/rebuttal/remote_corruptions/stages.py --device cuda --workers 8 --out-root /workspace/wdl-results/remote-noise-UNIQUE
+directory=/workspace/wdl-noise-handoff
+environment=OMP_NUM_THREADS="1",OPENBLAS_NUM_THREADS="1"
+autostart=false
+autorestart=false
+stdout_logfile=/workspace/wdl-results/noise-supervisor.log
+stderr_logfile=/workspace/wdl-results/noise-supervisor-stderr.log
+stopasgroup=true
+killasgroup=true
