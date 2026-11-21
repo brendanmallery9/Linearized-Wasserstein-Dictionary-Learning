@@ -8,7 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 import numpy as np,torch,joblib,ot
 from scipy.spatial import cKDTree
 from threadpoolctl import threadpool_limits
-A=Path(__file__).resolve().parent/'assets';SIGMAS=[.075,.10,.15,.20]
+A=Path(__file__).resolve().parent/'assets';SIGMAS=[.075,.10,.15,.20,.25,.30,.40]
 def sha(p):return hashlib.sha256(Path(p).read_bytes()).hexdigest()
 def save(p,x):
  p=Path(p);p.parent.mkdir(parents=True,exist_ok=True);q=p.with_suffix(p.suffix+'.tmp');q.write_text(json.dumps(x,indent=2,allow_nan=False));q.replace(p)
